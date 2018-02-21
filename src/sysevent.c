@@ -826,6 +826,7 @@ static void sysevent_dispatch_notification(
   }
 
   sstrncpy(n.host, hostname, sizeof(n.host));
+  sstrncpy(n.type, "gauge", sizeof(n.type));
 
   notification_meta_t *m = calloc(1, sizeof(*m));
 
