@@ -192,9 +192,9 @@ static int gen_message_payload(const char * msg, char * sev, int sev_num, char *
 
   int event_name_len = 0;
   event_name_len = event_name_len + strlen(host);      // host name
-  event_name_len = event_name_len + 21; // "host", "syslog", "message", 3 spaces and null-terminator
+  event_name_len = event_name_len + 22; // "host", "rsyslog", "message", 3 spaces and null-terminator
   memset(json_str, '\0', DATA_MAX_NAME_LEN);
-  snprintf(json_str, event_name_len, "host %s syslog message", host);
+  snprintf(json_str, event_name_len, "host %s rsyslog message", host);
 
   if (yajl_gen_string(g, (u_char *)json_str, strlen(json_str)) !=
       yajl_gen_status_ok) {
@@ -842,7 +842,7 @@ static void sysevent_dispatch_notification(
   m->type = NM_TYPE_STRING;
   n.meta = m;
 
-  INFO("sysevent plugin: notification message: %s",
+  DEBUG("sysevent plugin: notification message: %s",
         n.meta->nm_value.nm_string);
 
   DEBUG("sysevent plugin: dispatching message");
