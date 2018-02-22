@@ -121,8 +121,8 @@ static circbuf_t ring;
 
 static char *listen_ip;
 static char *listen_port;
-static int listen_buffer_size = 1024;
-static int buffer_length = 10;
+static int listen_buffer_size = 4096;
+static int buffer_length = 100;
 
 static regexfilterlist_t *regexfilterlist_head = NULL;
 
@@ -446,7 +446,7 @@ static void *sysevent_thread(void *arg) /* {{{ */
       ERROR("sysevent plugin: failed to receive data: %s", strerror(errno));
       status = -1;
     } else if (count >= sizeof(buffer)) {
-      WARNING("sysevent plugin: datagram too large for buffer: truncated");
+      DEBUG("sysevent plugin: datagram too large for buffer: truncated");
     } else {
       // 1. Acquire lock
       // 2. Push to buffer if there is room, otherwise raise warning
@@ -458,7 +458,7 @@ static void *sysevent_thread(void *arg) /* {{{ */
         next = 0;
 
       if (next == ring.tail) {
-        WARNING("sysevent plugin: ring buffer full");
+        DEBUG("sysevent plugin: ring buffer full");
       } else {
         DEBUG("sysevent plugin: writing %s", buffer);
 
@@ -667,10 +667,10 @@ static int sysevent_config_add_buffer_length(const oconfig_item_t *ci) /* {{{ */
 
   if (cf_util_get_int(ci, &tmp) != 0)
     return (-1);
-  else if ((tmp >= 3) && (tmp <= 1024))
+  else if ((tmp >= 3) && (tmp <= 4096))
     buffer_length = tmp;
   else {
-    WARNING("sysevent plugin: The `Bufferlength' must be between 3 and 1024.");
+    WARNING("sysevent plugin: The `Bufferlength' must be between 3 and 4096.");
     return (-1);
   }
 
