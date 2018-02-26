@@ -6371,6 +6371,7 @@ fi
 
 if test "x$with_libyajl" = "xyes"; then
   plugin_ceph="yes"
+  plugin_sysevent="yes"
 fi
 
 if test "x$have_processor_info" = "xyes"; then
@@ -6660,7 +6661,7 @@ AC_PLUGIN([snmp_agent],          [$with_libnetsnmpagent],   [SNMP agent plugin])
 AC_PLUGIN([statsd],              [yes],                     [StatsD plugin])
 AC_PLUGIN([swap],                [$plugin_swap],            [Swap usage statistics])
 AC_PLUGIN([synproxy],            [$plugin_synproxy],        [Synproxy stats plugin])
-AC_PLUGIN([sysevent],            [$plugin_sysevent],        [Syslog event statistics])
+AC_PLUGIN([sysevent],            [$plugin_sysevent],        [rsyslog events])
 AC_PLUGIN([syslog],              [$have_syslog],            [Syslog logging plugin])
 AC_PLUGIN([table],               [yes],                     [Parsing of tabular data])
 AC_PLUGIN([tail],                [yes],                     [Parsing of logfiles])
