@@ -29,8 +29,8 @@
 #include "common.h"
 #include "plugin.h"
 #include "utils_complain.h"
+#include "utils_ignorelist.h"
 
-#include <asm/types.h>
 #include <errno.h>
 #include <netdb.h>
 #include <netinet/in.h>
@@ -41,17 +41,13 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include <yajl/yajl_common.h>
-#include <yajl/yajl_gen.h>
-#include <yajl/yajl_tree.h>
 #if HAVE_YAJL_YAJL_VERSION_H
 #include <yajl/yajl_version.h>
 #endif
 #if defined(YAJL_MAJOR) && (YAJL_MAJOR > 1)
+#include <yajl/yajl_tree.h>
 #define HAVE_YAJL_V2 1
 #endif
-
-#define SYSEVENT_REGEX_MATCHES 1
 
 #define SYSEVENT_DOMAIN_FIELD "domain"
 #define SYSEVENT_DOMAIN_VALUE "syslog"
@@ -68,24 +64,24 @@
 #define SYSEVENT_REPORTING_ENTITY_NAME_FIELD "reportingEntityName"
 #define SYSEVENT_REPORTING_ENTITY_NAME_VALUE "collectd sysevent plugin"
 #define SYSEVENT_SEQUENCE_FIELD "sequence"
-#define SYSEVENT_SEQUENCE_VALUE "0"
+#define SYSEVENT_SEQUENCE_VALUE 0
 #define SYSEVENT_SOURCE_NAME_FIELD "sourceName"
 #define SYSEVENT_SOURCE_NAME_VALUE "syslog"
 #define SYSEVENT_START_EPOCH_MICROSEC_FIELD "startEpochMicrosec"
 #define SYSEVENT_VERSION_FIELD "version"
-#define SYSEVENT_VERSION_VALUE "1.0"
+#define SYSEVENT_VERSION_VALUE 1.0
 
 #define SYSEVENT_EVENT_SOURCE_HOST_FIELD "eventSourceHost"
 #define SYSEVENT_EVENT_SOURCE_TYPE_FIELD "eventSourceType"
 #define SYSEVENT_EVENT_SOURCE_TYPE_VALUE "host"
 #define SYSEVENT_SYSLOG_FIELDS_FIELD "syslogFields"
 #define SYSEVENT_SYSLOG_FIELDS_VERSION_FIELD "syslogFieldsVersion"
-#define SYSEVENT_SYSLOG_FIELDS_VERSION_VALUE "1.0"
+#define SYSEVENT_SYSLOG_FIELDS_VERSION_VALUE 1.0
 #define SYSEVENT_SYSLOG_MSG_FIELD "syslogMsg"
 #define SYSEVENT_SYSLOG_PROC_FIELD "syslogProc"
 #define SYSEVENT_SYSLOG_SEV_FIELD "syslogSev"
 #define SYSEVENT_SYSLOG_TAG_FIELD "syslogTag"
-#define SYSEVENT_SYSLOG_TAG_VALUE "NILVALUE" 
+#define SYSEVENT_SYSLOG_TAG_VALUE "NILVALUE"
 
 /*
  * Private data types
@@ -99,17 +95,10 @@ typedef struct {
   long long unsigned int *timestamp;
 } circbuf_t;
 
-struct regexfilterlist_s {
-  char *regex_filter;
-  regex_t regex_filter_obj;
-
-  struct regexfilterlist_s *next;
-};
-typedef struct regexfilterlist_s regexfilterlist_t;
-
 /*
  * Private variables
  */
+static ignorelist_t *ignorelist = NULL;
 
 static int sysevent_thread_loop = 0;
 static int sysevent_thread_error = 0;
@@ -122,302 +111,195 @@ static circbuf_t ring;
 static char *listen_ip;
 static char *listen_port;
 static int listen_buffer_size = 4096;
-static int buffer_length = 100;
+static int buffer_length = 10;
 
-static regexfilterlist_t *regexfilterlist_head = NULL;
+static int monitor_all_messages = 1;
 
+#if HAVE_YAJL_V2
 static const char *rsyslog_keys[3] = {"@timestamp", "@source_host", "@message"};
-static const char *rsyslog_field_keys[5] = {"facility", "severity", "severity-num", "program",
-                                            "processid"};
+static const char *rsyslog_field_keys[5] = {
+    "facility", "severity", "severity-num", "program", "processid"};
+#endif
 
 /*
  * Private functions
  */
 
-static int gen_message_payload(const char * msg, char * sev, int sev_num, char * process, char * host,
-                               long long unsigned int timestamp, char **buf) {
-  const unsigned char *buf2;
-  yajl_gen g;
-  char json_str[DATA_MAX_NAME_LEN];
-
-#if !defined(HAVE_YAJL_V2)
-  yajl_gen_config conf = {};
-
-  conf.beautify = 0;
-#endif
-
-#if HAVE_YAJL_V2
-  size_t len;
-  g = yajl_gen_alloc(NULL);
-  yajl_gen_config(g, yajl_gen_beautify, 0);
-#else
-  unsigned int len;
-  g = yajl_gen_alloc(&conf, NULL);
-#endif
-
-  yajl_gen_clear(g);
+static int gen_metadata_payload(const char *msg, char *sev, int sev_num,
+                                char *process, char *host,
+                                long long unsigned int timestamp,
+                                notification_t *n) {
+  char tmp_str[DATA_MAX_NAME_LEN];
+  notification_meta_t *header = NULL;
+  notification_meta_t *domain = NULL;
 
   // *** BEGIN common event header ***
 
-  if (yajl_gen_map_open(g) != yajl_gen_status_ok)
+  // Add the object as "ves" to the notification's meta (the notification's meta
+  // will be created by this call, and it will be the VES header)
+
+  if (plugin_notification_meta_add_nested(n, "ves") != 0)
     goto err;
+
+  // Now populate the VES header, but first we need to acquire it
+  if (plugin_notification_meta_get_meta_tail(n, &header) != 0)
+    goto err;
+
+  if (header == NULL) {
+    ERROR(
+        "sysevent plugin: gen_metadata_payload could not acquire VES header.");
+    goto err;
+  }
 
   // domain
-  if (yajl_gen_string(g, (u_char *)SYSEVENT_DOMAIN_FIELD,
-                      strlen(SYSEVENT_DOMAIN_FIELD)) != yajl_gen_status_ok)
-    goto err;
-
-  if (yajl_gen_string(g, (u_char *)SYSEVENT_DOMAIN_VALUE,
-                      strlen(SYSEVENT_DOMAIN_VALUE)) != yajl_gen_status_ok)
+  if (plugin_notification_meta_append_string(header, SYSEVENT_DOMAIN_FIELD,
+                                             SYSEVENT_DOMAIN_VALUE) != 0)
     goto err;
 
   // eventId
-  if (yajl_gen_string(g, (u_char *)SYSEVENT_EVENT_ID_FIELD,
-                      strlen(SYSEVENT_EVENT_ID_FIELD)) != yajl_gen_status_ok)
-    goto err;
-
   event_id = event_id + 1;
-  int event_id_len = sizeof(char) * sizeof(int) * 4 + 1;
-  memset(json_str, '\0', DATA_MAX_NAME_LEN);
-  snprintf(json_str, event_id_len, "%d", event_id);
 
-  if (yajl_gen_number(g, json_str, strlen(json_str)) != yajl_gen_status_ok) {
+  if (plugin_notification_meta_append_unsigned_int(
+          header, SYSEVENT_EVENT_ID_FIELD, event_id) != 0)
     goto err;
-  }
 
   // eventName
-  if (yajl_gen_string(g, (u_char *)SYSEVENT_EVENT_NAME_FIELD,
-                      strlen(SYSEVENT_EVENT_NAME_FIELD)) != yajl_gen_status_ok)
-    goto err;
-
   int event_name_len = 0;
-  event_name_len = event_name_len + strlen(host);      // host name
-  event_name_len = event_name_len + 22; // "host", "rsyslog", "message", 3 spaces and null-terminator
-  memset(json_str, '\0', DATA_MAX_NAME_LEN);
-  snprintf(json_str, event_name_len, "host %s rsyslog message", host);
+  event_name_len = event_name_len + strlen(host); // host name
+  event_name_len =
+      event_name_len +
+      22; // "host", "rsyslog", "message", 3 spaces and null-terminator
+  memset(tmp_str, '\0', DATA_MAX_NAME_LEN);
+  snprintf(tmp_str, event_name_len, "host %s rsyslog message", host);
 
-  if (yajl_gen_string(g, (u_char *)json_str, strlen(json_str)) !=
-      yajl_gen_status_ok) {
+  if (plugin_notification_meta_append_string(header, SYSEVENT_EVENT_NAME_FIELD,
+                                             tmp_str) != 0)
     goto err;
-  }
 
   // lastEpochMicrosec
-  if (yajl_gen_string(g, (u_char *)SYSEVENT_LAST_EPOCH_MICROSEC_FIELD,
-                      strlen(SYSEVENT_LAST_EPOCH_MICROSEC_FIELD)) !=
-      yajl_gen_status_ok)
+  if (plugin_notification_meta_append_unsigned_int(
+          header, SYSEVENT_LAST_EPOCH_MICROSEC_FIELD,
+          (long long unsigned int)CDTIME_T_TO_US(cdtime())) != 0)
     goto err;
-
-  int last_epoch_microsec_len =
-      sizeof(char) * sizeof(long long unsigned int) * 4 + 1;
-  memset(json_str, '\0', DATA_MAX_NAME_LEN);
-  snprintf(json_str, last_epoch_microsec_len, "%llu",
-           (long long unsigned int)CDTIME_T_TO_US(cdtime()));
-
-  if (yajl_gen_number(g, json_str, strlen(json_str)) != yajl_gen_status_ok) {
-    goto err;
-  }
 
   // priority
-  if (yajl_gen_string(g, (u_char *)SYSEVENT_PRIORITY_FIELD,
-                      strlen(SYSEVENT_PRIORITY_FIELD)) != yajl_gen_status_ok)
-    goto err;
+  memset(tmp_str, '\0', DATA_MAX_NAME_LEN);
 
-  switch (sev_num)
-  {
-    case 4:
-      if (yajl_gen_string(g, (u_char *)SYSEVENT_PRIORITY_VALUE_MEDIUM,
-                      strlen(SYSEVENT_PRIORITY_VALUE_MEDIUM)) != yajl_gen_status_ok)
-        goto err;
-      break;
-    case 5:
-      if (yajl_gen_string(g, (u_char *)SYSEVENT_PRIORITY_VALUE_NORMAL,
-                      strlen(SYSEVENT_PRIORITY_VALUE_NORMAL)) != yajl_gen_status_ok)
-        goto err;
-      break;
-    case 6:
-    case 7:
-      if (yajl_gen_string(g, (u_char *)SYSEVENT_PRIORITY_VALUE_LOW,
-                      strlen(SYSEVENT_PRIORITY_VALUE_LOW)) != yajl_gen_status_ok)
-        goto err;
-      break;
-    default:
-      if (yajl_gen_string(g, (u_char *)SYSEVENT_PRIORITY_VALUE_UNKNOWN,
-                      strlen(SYSEVENT_PRIORITY_VALUE_UNKNOWN)) != yajl_gen_status_ok)
-        goto err;
-      break;
+  switch (sev_num) {
+  case 4:
+    snprintf(tmp_str, strlen(SYSEVENT_PRIORITY_VALUE_MEDIUM), "%s",
+             SYSEVENT_PRIORITY_VALUE_MEDIUM);
+    break;
+  case 5:
+    snprintf(tmp_str, strlen(SYSEVENT_PRIORITY_VALUE_NORMAL), "%s",
+             SYSEVENT_PRIORITY_VALUE_NORMAL);
+    break;
+  case 6:
+  case 7:
+    snprintf(tmp_str, strlen(SYSEVENT_PRIORITY_VALUE_LOW), "%s",
+             SYSEVENT_PRIORITY_VALUE_LOW);
+    break;
+  default:
+    snprintf(tmp_str, strlen(SYSEVENT_PRIORITY_VALUE_UNKNOWN), "%s",
+             SYSEVENT_PRIORITY_VALUE_UNKNOWN);
+    break;
   }
+
+  if (plugin_notification_meta_append_string(header, SYSEVENT_PRIORITY_FIELD,
+                                             tmp_str) != 0)
+    goto err;
 
   // reportingEntityName
-  if (yajl_gen_string(g, (u_char *)SYSEVENT_REPORTING_ENTITY_NAME_FIELD,
-                      strlen(SYSEVENT_REPORTING_ENTITY_NAME_FIELD)) !=
-      yajl_gen_status_ok)
-    goto err;
+  if (plugin_notification_meta_append_string(
+          header, SYSEVENT_REPORTING_ENTITY_NAME_FIELD,
+          SYSEVENT_REPORTING_ENTITY_NAME_VALUE) != 0)
 
-  if (yajl_gen_string(g, (u_char *)SYSEVENT_REPORTING_ENTITY_NAME_VALUE,
-                      strlen(SYSEVENT_REPORTING_ENTITY_NAME_VALUE)) !=
-      yajl_gen_status_ok)
-    goto err;
-
-  // sequence
-  if (yajl_gen_string(g, (u_char *)SYSEVENT_SEQUENCE_FIELD,
-                      strlen(SYSEVENT_SEQUENCE_FIELD)) != yajl_gen_status_ok)
-    goto err;
-
-  if (yajl_gen_number(g, SYSEVENT_SEQUENCE_VALUE,
-                      strlen(SYSEVENT_SEQUENCE_VALUE)) != yajl_gen_status_ok)
-    goto err;
+    // sequence
+    if (plugin_notification_meta_append_unsigned_int(
+            header, SYSEVENT_SEQUENCE_FIELD,
+            (unsigned int)SYSEVENT_SEQUENCE_VALUE) != 0)
+      goto err;
 
   // sourceName
-  if (yajl_gen_string(g, (u_char *)SYSEVENT_SOURCE_NAME_FIELD,
-                      strlen(SYSEVENT_SOURCE_NAME_FIELD)) !=
-      yajl_gen_status_ok)
-    goto err;
+  if (plugin_notification_meta_append_string(header, SYSEVENT_SOURCE_NAME_FIELD,
+                                             process) != 0)
 
-  if (yajl_gen_string(g, (u_char *)SYSEVENT_SOURCE_NAME_VALUE,
-                      strlen(SYSEVENT_SOURCE_NAME_VALUE)) !=
-      yajl_gen_status_ok)
-    goto err;
-
-  // startEpochMicrosec
-  if (yajl_gen_string(g, (u_char *)SYSEVENT_START_EPOCH_MICROSEC_FIELD,
-                      strlen(SYSEVENT_START_EPOCH_MICROSEC_FIELD)) !=
-      yajl_gen_status_ok)
-    goto err;
-
-  int start_epoch_microsec_len =
-      sizeof(char) * sizeof(long long unsigned int) * 4 + 1;
-  memset(json_str, '\0', DATA_MAX_NAME_LEN);
-  snprintf(json_str, start_epoch_microsec_len, "%llu",
-           (long long unsigned int)timestamp);
-
-  if (yajl_gen_number(g, json_str, strlen(json_str)) != yajl_gen_status_ok) {
-    goto err;
-  }
+    // startEpochMicrosec
+    if (plugin_notification_meta_append_unsigned_int(
+            header, SYSEVENT_START_EPOCH_MICROSEC_FIELD,
+            (long long unsigned int)timestamp) != 0)
+      goto err;
 
   // version
-  if (yajl_gen_string(g, (u_char *)SYSEVENT_VERSION_FIELD,
-                      strlen(SYSEVENT_VERSION_FIELD)) != yajl_gen_status_ok)
-    goto err;
-
-  if (yajl_gen_number(g, SYSEVENT_VERSION_VALUE,
-                      strlen(SYSEVENT_VERSION_VALUE)) != yajl_gen_status_ok)
+  if (plugin_notification_meta_append_double(header, SYSEVENT_VERSION_FIELD,
+                                             SYSEVENT_VERSION_VALUE) != 0)
     goto err;
 
   // *** END common event header ***
 
   // *** BEGIN syslog fields ***
 
-  if (yajl_gen_string(g, (u_char *)SYSEVENT_SYSLOG_FIELDS_FIELD,
-                      strlen(SYSEVENT_SYSLOG_FIELDS_FIELD)) !=
-      yajl_gen_status_ok)
+  // Append a nested metadata object to header, with key as "syslogFields",
+  // and then find it.  We will then append children data to it.
+
+  if (plugin_notification_meta_append_nested(header,
+                                             SYSEVENT_SYSLOG_FIELDS_FIELD) != 0)
     goto err;
 
-  if (yajl_gen_map_open(g) != yajl_gen_status_ok)
+  if (plugin_notification_meta_get_nested_tail(header, &domain) != 0)
     goto err;
+
+  if (domain == NULL) {
+    ERROR(
+        "sysevent plugin: gen_metadata_payload could not acquire VES domain.");
+    goto err;
+  }
 
   // eventSourceHost
-  if (yajl_gen_string(g, (u_char *)SYSEVENT_EVENT_SOURCE_HOST_FIELD,
-                      strlen(SYSEVENT_EVENT_SOURCE_HOST_FIELD)) !=
-      yajl_gen_status_ok)
-    goto err;
-
-  if (yajl_gen_string(g, (u_char *)host, strlen(host)) !=
-      yajl_gen_status_ok)
+  if (plugin_notification_meta_append_string(
+          domain, SYSEVENT_EVENT_SOURCE_HOST_FIELD, host) != 0)
     goto err;
 
   // eventSourceType
-  if (yajl_gen_string(g, (u_char *)SYSEVENT_EVENT_SOURCE_TYPE_FIELD,
-                      strlen(SYSEVENT_EVENT_SOURCE_TYPE_FIELD)) !=
-      yajl_gen_status_ok)
-    goto err;
-
-  if (yajl_gen_string(g, (u_char *)SYSEVENT_EVENT_SOURCE_TYPE_VALUE,
-                      strlen(SYSEVENT_EVENT_SOURCE_TYPE_VALUE)) !=
-      yajl_gen_status_ok)
+  if (plugin_notification_meta_append_string(
+          domain, SYSEVENT_EVENT_SOURCE_TYPE_FIELD,
+          SYSEVENT_EVENT_SOURCE_TYPE_VALUE) != 0)
     goto err;
 
   // syslogFieldsVersion
-  if (yajl_gen_string(g, (u_char *)SYSEVENT_SYSLOG_FIELDS_VERSION_FIELD,
-                      strlen(SYSEVENT_SYSLOG_FIELDS_VERSION_FIELD)) !=
-      yajl_gen_status_ok)
-    goto err;
-
-  if (yajl_gen_number(g, SYSEVENT_SYSLOG_FIELDS_VERSION_VALUE,
-                      strlen(SYSEVENT_SYSLOG_FIELDS_VERSION_VALUE)) !=
-      yajl_gen_status_ok)
-    goto err;
-
-  if (yajl_gen_map_close(g) != yajl_gen_status_ok)
+  if (plugin_notification_meta_append_double(
+          domain, SYSEVENT_SYSLOG_FIELDS_VERSION_FIELD,
+          SYSEVENT_SYSLOG_FIELDS_VERSION_VALUE) != 0)
     goto err;
 
   // syslogMsg
-  if (msg != NULL)
-  {
-    if (yajl_gen_string(g, (u_char *)SYSEVENT_SYSLOG_MSG_FIELD,
-                        strlen(SYSEVENT_SYSLOG_MSG_FIELD)) !=
-        yajl_gen_status_ok)
-      goto err;
-
-    if (yajl_gen_string(g, (u_char *)msg, strlen(msg)) !=
-        yajl_gen_status_ok)
-      goto err;
-  }
+  if (plugin_notification_meta_append_string(domain, SYSEVENT_SYSLOG_MSG_FIELD,
+                                             msg) != 0)
+    goto err;
 
   // syslogProc
-  if (process != NULL)
-  {
-    if (yajl_gen_string(g, (u_char *)SYSEVENT_SYSLOG_PROC_FIELD,
-                        strlen(SYSEVENT_SYSLOG_PROC_FIELD)) !=
-        yajl_gen_status_ok)
-      goto err;
-
-    if (yajl_gen_string(g, (u_char *)process, strlen(process)) !=
-        yajl_gen_status_ok)
-      goto err;
-  }
+  if (plugin_notification_meta_append_string(domain, SYSEVENT_SYSLOG_PROC_FIELD,
+                                             process) != 0)
+    goto err;
 
   // syslogSev
-  if (sev != NULL)
-  {
-    if (yajl_gen_string(g, (u_char *)SYSEVENT_SYSLOG_SEV_FIELD,
-                        strlen(SYSEVENT_SYSLOG_SEV_FIELD)) !=
-        yajl_gen_status_ok)
-      goto err;
-
-    if (yajl_gen_string(g, (u_char *)sev, strlen(sev)) !=
-        yajl_gen_status_ok)
+  if (sev != NULL) {
+    if (plugin_notification_meta_append_string(
+            domain, SYSEVENT_SYSLOG_SEV_FIELD, sev) != 0)
       goto err;
   }
 
   // syslogTag
-  if (yajl_gen_string(g, (u_char *)SYSEVENT_SYSLOG_TAG_FIELD,
-                      strlen(SYSEVENT_SYSLOG_TAG_FIELD)) !=
-      yajl_gen_status_ok)
-    goto err;
-
-  if (yajl_gen_string(g, (u_char *)SYSEVENT_SYSLOG_TAG_VALUE, strlen(SYSEVENT_SYSLOG_TAG_VALUE)) !=
-      yajl_gen_status_ok)
+  if (plugin_notification_meta_append_string(domain, SYSEVENT_SYSLOG_TAG_FIELD,
+                                             SYSEVENT_SYSLOG_TAG_VALUE) != 0)
     goto err;
 
   // *** END syslog fields ***
 
-  if (yajl_gen_map_close(g) != yajl_gen_status_ok)
-    goto err;
-
-  if (yajl_gen_get_buf(g, &buf2, &len) != yajl_gen_status_ok)
-    goto err;
-
-  *buf = malloc(strlen((char *)buf2) + 1);
-
-  sstrncpy(*buf, (char *)buf2, strlen((char *)buf2) + 1);
-
-  yajl_gen_free(g);
-
   return 0;
 
 err:
-  yajl_gen_free(g);
-  ERROR("sysevent plugin: gen_message_payload failed to generate JSON");
+  ERROR("sysevent plugin: gen_metadata_payload failed to generate JSON");
   return -1;
 }
 
@@ -446,7 +328,7 @@ static void *sysevent_thread(void *arg) /* {{{ */
       ERROR("sysevent plugin: failed to receive data: %s", strerror(errno));
       status = -1;
     } else if (count >= sizeof(buffer)) {
-      DEBUG("sysevent plugin: datagram too large for buffer: truncated");
+      WARNING("sysevent plugin: datagram too large for buffer: truncated");
     } else {
       // 1. Acquire lock
       // 2. Push to buffer if there is room, otherwise raise warning
@@ -458,12 +340,13 @@ static void *sysevent_thread(void *arg) /* {{{ */
         next = 0;
 
       if (next == ring.tail) {
-        DEBUG("sysevent plugin: ring buffer full");
+        WARNING("sysevent plugin: ring buffer full");
       } else {
         DEBUG("sysevent plugin: writing %s", buffer);
 
         strncpy(ring.buffer[ring.head], buffer, sizeof(buffer));
-        ring.timestamp[ring.head] = (long long unsigned int)CDTIME_T_TO_US(cdtime());
+        ring.timestamp[ring.head] =
+            (long long unsigned int)CDTIME_T_TO_US(cdtime());
         ring.head = next;
       }
 
@@ -686,34 +569,23 @@ static int sysevent_config_add_regex_filter(const oconfig_item_t *ci) /* {{{ */
     return (-1);
   }
 
-  regexfilterlist_t *rl;
-  char *regexp_str;
-  regex_t regexp;
-  int status;
+#if HAVE_REGEX_H
+  if (ignorelist == NULL)
+    ignorelist = ignorelist_create(/* invert = */ 1);
 
-  regexp_str = strdup(ci->values[0].value.string);
-
-  status = regcomp(&regexp, regexp_str, REG_EXTENDED);
+  int status = ignorelist_add(ignorelist, ci->values[0].value.string);
 
   if (status != 0) {
-    ERROR("sysevent plugin: 'RegexFilter' invalid regular expression: %s",
-          regexp_str);
-    return (-1);
+    ERROR("sysevent plugin: invalid regular expression: %s",
+          ci->values[0].value.string);
+    return (1);
   }
 
-  rl = malloc(sizeof(*rl));
-  if (rl == NULL) {
-    char errbuf[1024];
-    ERROR("sysevent plugin: malloc failed during "
-          "sysevent_config_add_regex_filter: %s",
-          sstrerror(errno, errbuf, sizeof(errbuf)));
-    return (-1);
-  }
-
-  rl->regex_filter = regexp_str;
-  rl->regex_filter_obj = regexp;
-  rl->next = regexfilterlist_head;
-  regexfilterlist_head = rl;
+  monitor_all_messages = 0;
+#else
+  WARNING("sysevent plugin: The plugin has been compiled without support "
+          "for the \"RegexFilter\" option.");
+#endif
 
   return (0);
 }
@@ -739,16 +611,16 @@ static int sysevent_config(oconfig_item_t *ci) /* {{{ */
   return (0);
 } /* }}} int sysevent_config */
 
-static void sysevent_dispatch_notification(
-    const char *message, yajl_val *node,
-     long long unsigned int timestamp) {
-  char *buf = NULL;
-  notification_t n = {
-      NOTIF_OKAY, cdtime(), "", "", "sysevent", "", "", "", NULL};
+static void sysevent_dispatch_notification(const char *message,
+#if HAVE_YAJL_V2
+                                           yajl_val *node,
+#endif
+                                           long long unsigned int timestamp) {
 
-  char hostname[1024];
-  gethostname(hostname, sizeof(hostname));
+  notification_t n = {NOTIF_OKAY, cdtime(), "", "",  "sysevent",
+                      "",         "",       "", NULL};
 
+#if HAVE_YAJL_V2
   if (node != NULL) {
     // If we have a parsed-JSON node to work with, use that
 
@@ -756,36 +628,39 @@ static void sysevent_dispatch_notification(
     char severity[listen_buffer_size];
     char sev_num_str[listen_buffer_size];
     char msg[listen_buffer_size];
+    char hostname_str[listen_buffer_size];
     int sev_num = -1;
 
     // msg
-    const char * msg_path[] = {rsyslog_keys[2], (const char *)0};
+    const char *msg_path[] = {rsyslog_keys[2], (const char *)0};
     yajl_val msg_v = yajl_tree_get(*node, msg_path, yajl_t_string);
 
-    if (msg_v != NULL)
-    {
+    if (msg_v != NULL) {
       memset(msg, '\0', listen_buffer_size);
       snprintf(msg, listen_buffer_size, "%s%c", YAJL_GET_STRING(msg_v), '\0');
     }
 
     // severity
-    const char * severity_path[] = {"@fields", rsyslog_field_keys[1], (const char *)0};
+    const char *severity_path[] = {"@fields", rsyslog_field_keys[1],
+                                   (const char *)0};
     yajl_val severity_v = yajl_tree_get(*node, severity_path, yajl_t_string);
 
-    if (severity_v != NULL)
-    {
+    if (severity_v != NULL) {
       memset(severity, '\0', listen_buffer_size);
-      snprintf(severity, listen_buffer_size, "%s%c", YAJL_GET_STRING(severity_v), '\0');
+      snprintf(severity, listen_buffer_size, "%s%c",
+               YAJL_GET_STRING(severity_v), '\0');
     }
 
     // sev_num
-    const char * sev_num_str_path[] = {"@fields", rsyslog_field_keys[2], (const char *)0};
-    yajl_val sev_num_str_v = yajl_tree_get(*node, sev_num_str_path, yajl_t_string);
+    const char *sev_num_str_path[] = {"@fields", rsyslog_field_keys[2],
+                                      (const char *)0};
+    yajl_val sev_num_str_v =
+        yajl_tree_get(*node, sev_num_str_path, yajl_t_string);
 
-    if (sev_num_str_v != NULL)
-    {
+    if (sev_num_str_v != NULL) {
       memset(sev_num_str, '\0', listen_buffer_size);
-      snprintf(sev_num_str, listen_buffer_size, "%s%c", YAJL_GET_STRING(sev_num_str_v), '\0');
+      snprintf(sev_num_str, listen_buffer_size, "%s%c",
+               YAJL_GET_STRING(sev_num_str_v), '\0');
 
       sev_num = atoi(sev_num_str);
 
@@ -794,66 +669,50 @@ static void sysevent_dispatch_notification(
     }
 
     // process
-    const char * process_path[] = {"@fields", rsyslog_field_keys[3], (const char *)0};
+    const char *process_path[] = {"@fields", rsyslog_field_keys[3],
+                                  (const char *)0};
     yajl_val process_v = yajl_tree_get(*node, process_path, yajl_t_string);
 
-    if (process_v != NULL)
-    {
+    if (process_v != NULL) {
       memset(process, '\0', listen_buffer_size);
-      snprintf(process, listen_buffer_size, "%s%c", YAJL_GET_STRING(process_v), '\0');
+      snprintf(process, listen_buffer_size, "%s%c", YAJL_GET_STRING(process_v),
+               '\0');
     }
 
     // hostname
-    const char * hostname_path[] = {rsyslog_keys[1], (const char *)0};
+    const char *hostname_path[] = {rsyslog_keys[1], (const char *)0};
     yajl_val hostname_v = yajl_tree_get(*node, hostname_path, yajl_t_string);
 
-    if (hostname_v != NULL)
-    {
-      memset(hostname, '\0', 1024);
-      snprintf(hostname, 1024, "%s%c", YAJL_GET_STRING(hostname_v), '\0');
+    if (hostname_v != NULL) {
+      memset(hostname_str, '\0', listen_buffer_size);
+      snprintf(hostname_str, listen_buffer_size, "%s%c",
+               YAJL_GET_STRING(hostname_v), '\0');
     }
 
-    gen_message_payload((msg_v != NULL ? msg : NULL), (severity_v != NULL ? severity : NULL), 
-                        (sev_num_str_v != NULL ? sev_num : -1), (process_v != NULL ? process : NULL), 
-                        hostname, timestamp, &buf);
+    gen_metadata_payload(
+        (msg_v != NULL ? msg : NULL), (severity_v != NULL ? severity : NULL),
+        (sev_num_str_v != NULL ? sev_num : -1),
+        (process_v != NULL ? process : NULL),
+        (hostname_v != NULL ? hostname_str : hostname_g), timestamp, &n);
   } else {
     // Data was not sent in JSON format, so just treat the whole log entry
-    // as the message (and we'll be unable to acquire certain data, so the payload
+    // as the message (and we'll be unable to acquire certain data, so the
+    // payload
     // generated below will be less informative)
-    
-    gen_message_payload(message, NULL, -1, NULL, hostname,
-                               timestamp, &buf);
-  }
 
-  sstrncpy(n.host, hostname, sizeof(n.host));
+    gen_metadata_payload(message, NULL, -1, NULL, hostname_g, timestamp, &n);
+  }
+#else
+  gen_metadata_payload(message, NULL, -1, NULL, hostname_g, timestamp, &n);
+#endif
+
+  sstrncpy(n.host, hostname_g, sizeof(n.host));
   sstrncpy(n.type, "gauge", sizeof(n.type));
-
-  notification_meta_t *m = calloc(1, sizeof(*m));
-
-  if (m == NULL) {
-    char errbuf[1024];
-    sfree(buf);
-    ERROR("sysevent plugin: unable to allocate metadata: %s",
-          sstrerror(errno, errbuf, sizeof(errbuf)));
-    return;
-  }
-
-  sstrncpy(m->name, "ves", sizeof(m->name));
-  m->nm_value.nm_string = sstrdup(buf);
-  m->type = NM_TYPE_STRING;
-  n.meta = m;
-
-  DEBUG("sysevent plugin: notification message: %s",
-        n.meta->nm_value.nm_string);
 
   DEBUG("sysevent plugin: dispatching message");
 
   plugin_dispatch_notification(&n);
   plugin_notification_meta_free(n.meta);
-
-  // malloc'd in gen_message_payload
-  if (buf != NULL)
-    sfree(buf);
 }
 
 static int sysevent_read(void) /* {{{ */
@@ -876,19 +735,20 @@ static int sysevent_read(void) /* {{{ */
     long long unsigned int timestamp;
     int is_match = 1;
     char *match_str = NULL;
-    regexfilterlist_t *rl = regexfilterlist_head;
     int next = ring.tail + 1;
-    yajl_val node;
-    char errbuf[1024];
 
     if (next >= ring.maxLen)
       next = 0;
 
-    DEBUG("sysevent plugin: reading from ring buffer: %s", ring.buffer[ring.tail]);
+    DEBUG("sysevent plugin: reading from ring buffer: %s",
+          ring.buffer[ring.tail]);
 
     timestamp = ring.timestamp[ring.tail];
 
+#if HAVE_YAJL_V2
     // Try to parse JSON, and if it fails, fall back to plain string
+    yajl_val node = NULL;
+    char errbuf[1024];
     errbuf[0] = 0;
     node = yajl_tree_parse((const char *)ring.buffer[ring.tail], errbuf,
                            sizeof(errbuf));
@@ -898,7 +758,7 @@ static int sysevent_read(void) /* {{{ */
 
       // If we have any regex filters, we need to see if the message portion of
       // the data matches any of them (otherwise we're not interested)
-      if (regexfilterlist_head != NULL) {
+      if (monitor_all_messages == 0) {
         char json_val[listen_buffer_size];
         const char *path[] = {"@message", (const char *)0};
         yajl_val v = yajl_tree_get(node, path, yajl_t_string);
@@ -915,38 +775,36 @@ static int sysevent_read(void) /* {{{ */
 
       // If we have any regex filters, we need to see if the message data
       // matches any of them (otherwise we're not interested)
-      if (regexfilterlist_head != NULL)
+      if (monitor_all_messages == 0)
         match_str = ring.buffer[ring.tail];
     }
+#else
+    // If we have any regex filters, we need to see if the message data
+    // matches any of them (otherwise we're not interested)
+    if (monitor_all_messages == 0)
+      match_str = ring.buffer[ring.tail];
+#endif
 
     // If we care about matching, do that comparison here
     if (match_str != NULL) {
-      is_match = 0;
+      is_match = 1;
 
-      while (rl != NULL) {
-        regmatch_t matches[SYSEVENT_REGEX_MATCHES];
-
-        is_match = (regexec(&rl->regex_filter_obj, match_str,
-                            SYSEVENT_REGEX_MATCHES, matches, 0) == 0
-                        ? 1
-                        : 0);
-
-        if (is_match == 1) {
-          DEBUG("sysevent plugin: regex filter match: %s", rl->regex_filter);
-          break;
-        }
-
-        rl = rl->next;
-      }
+      if (ignorelist_match(ignorelist, match_str) != 0)
+        is_match = 0;
+      else
+        DEBUG("sysevent plugin: regex filter match");
     }
 
-    if (is_match == 1 && node != NULL)
+#if HAVE_YAJL_V2
+    if (is_match == 1 && node != NULL) {
       sysevent_dispatch_notification(NULL, &node, timestamp);
-    else if (is_match == 1)
-      sysevent_dispatch_notification(ring.buffer[ring.tail], NULL, timestamp);
-
-    if (node != NULL)
       yajl_tree_free(node);
+    } else if (is_match == 1)
+      sysevent_dispatch_notification(ring.buffer[ring.tail], NULL, timestamp);
+#else
+    if (is_match == 1)
+      sysevent_dispatch_notification(ring.buffer[ring.tail], timestamp);
+#endif
 
     ring.tail = next;
   }
@@ -959,7 +817,6 @@ static int sysevent_read(void) /* {{{ */
 static int sysevent_shutdown(void) /* {{{ */
 {
   int status;
-  regexfilterlist_t *rl;
 
   DEBUG("sysevent plugin: Shutting down thread.");
   if (stop_thread(1) < 0)
@@ -985,20 +842,6 @@ static int sysevent_shutdown(void) /* {{{ */
   free(ring.buffer);
   free(ring.timestamp);
 
-  rl = regexfilterlist_head;
-  while (rl != NULL) {
-    regexfilterlist_t *rl_next;
-
-    rl_next = rl->next;
-
-    free(rl->regex_filter);
-    regfree(&rl->regex_filter_obj);
-
-    sfree(rl);
-
-    rl = rl_next;
-  }
-
   return (0);
 } /* }}} int sysevent_shutdown */
 
@@ -1008,4 +851,3 @@ void module_register(void) {
   plugin_register_read("sysevent", sysevent_read);
   plugin_register_shutdown("sysevent", sysevent_shutdown);
 } /* void module_register */
-  
