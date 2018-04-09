@@ -6153,6 +6153,7 @@ plugin_bind="no"
 plugin_ceph="no"
 plugin_cgroups="no"
 plugin_connectivity="no"
+plugin_connectivity_sim="no"
 plugin_conntrack="no"
 plugin_contextswitch="no"
 plugin_cpu="no"
@@ -6192,6 +6193,7 @@ plugin_perl="no"
 plugin_pinba="no"
 plugin_processes="no"
 plugin_procevent="no"
+plugin_procevent_sim="no"
 plugin_protocols="no"
 plugin_python="no"
 plugin_serial="no"
@@ -6241,6 +6243,7 @@ if test "x$ac_system" = "xLinux"; then
   plugin_numa="yes"
   plugin_processes="yes"
   plugin_procevent="yes"
+  plugin_procevent_sim="yes"
   plugin_protocols="yes"
   plugin_serial="yes"
   plugin_swap="yes"
@@ -6377,6 +6380,7 @@ fi
 
 if test "x$with_libmnl" = "xyes"; then
   plugin_connectivity="yes"
+  plugin_connectivity_sim="yes"
 fi
 
 if test "x$have_processor_info" = "xyes"; then
@@ -6574,6 +6578,7 @@ AC_PLUGIN([ceph],                [$plugin_ceph],            [Ceph daemon statist
 AC_PLUGIN([cgroups],             [$plugin_cgroups],         [CGroups CPU usage accounting])
 AC_PLUGIN([chrony],              [yes],                     [Chrony statistics])
 AC_PLUGIN([connectivity],        [$plugin_connectivity],    [Network interface up/down events])
+AC_PLUGIN([connectivity_sim],    [$plugin_connectivity_sim],[Network interface up/down events (simulated)])
 AC_PLUGIN([conntrack],           [$plugin_conntrack],       [nf_conntrack statistics])
 AC_PLUGIN([contextswitch],       [$plugin_contextswitch],   [context switch statistics])
 AC_PLUGIN([cpu],                 [$plugin_cpu],             [CPU usage statistics])
@@ -6660,6 +6665,7 @@ AC_PLUGIN([ping],                [$with_liboping],          [Network latency sta
 AC_PLUGIN([postgresql],          [$with_libpq],             [PostgreSQL database statistics])
 AC_PLUGIN([powerdns],            [yes],                     [PowerDNS statistics])
 AC_PLUGIN([procevent],           [$plugin_procevent],       [Process event (start, stop) events])
+AC_PLUGIN([procevent_sim],       [$plugin_procevent_sim],   [Process event (start, stop) events (simulated)])
 AC_PLUGIN([processes],           [$plugin_processes],       [Process statistics])
 AC_PLUGIN([protocols],           [$plugin_protocols],       [Protocol (IP, TCP, ...) statistics])
 AC_PLUGIN([python],              [$plugin_python],          [Embed a Python interpreter])
@@ -6998,6 +7004,7 @@ AC_MSG_RESULT([    ceph  . . . . . . . . $enable_ceph])
 AC_MSG_RESULT([    cgroups . . . . . . . $enable_cgroups])
 AC_MSG_RESULT([    chrony. . . . . . . . $enable_chrony])
 AC_MSG_RESULT([    connectivity. . . . . $enable_connectivity])
+AC_MSG_RESULT([    connectivity_sim. . . $enable_connectivity_sim])
 AC_MSG_RESULT([    conntrack . . . . . . $enable_conntrack])
 AC_MSG_RESULT([    contextswitch . . . . $enable_contextswitch])
 AC_MSG_RESULT([    cpu . . . . . . . . . $enable_cpu])
@@ -7084,6 +7091,7 @@ AC_MSG_RESULT([    postgresql  . . . . . $enable_postgresql])
 AC_MSG_RESULT([    powerdns  . . . . . . $enable_powerdns])
 AC_MSG_RESULT([    processes . . . . . . $enable_processes])
 AC_MSG_RESULT([    procevent . . . . . . $enable_procevent])
+AC_MSG_RESULT([    procevent_sim . . . . $enable_procevent_sim])
 AC_MSG_RESULT([    protocols . . . . . . $enable_protocols])
 AC_MSG_RESULT([    python  . . . . . . . $enable_python])
 AC_MSG_RESULT([    redis . . . . . . . . $enable_redis])
