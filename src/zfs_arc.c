@@ -99,6 +99,11 @@ static void free_zfs_values(kstat_t *ksp) {
 }
 
 #elif defined(KERNEL_SOLARIS)
+
+#if HAVE_KSTAT_H
+#include <kstat.h>
+#endif
+
 extern kstat_ctl_t *kc;
 
 static long long get_zfs_value(kstat_t *ksp, char *name) {
@@ -202,9 +207,8 @@ static int za_read(void) {
 
   fh = fopen(ZOL_ARCSTATS_FILE, "r");
   if (fh == NULL) {
-    char errbuf[1024];
     ERROR("zfs_arc plugin: Opening \"%s\" failed: %s", ZOL_ARCSTATS_FILE,
-          sstrerror(errno, errbuf, sizeof(errbuf)));
+          STRERRNO);
     return -1;
   }
 
