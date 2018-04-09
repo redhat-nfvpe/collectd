@@ -886,7 +886,7 @@ static void procevent_submit(int pid, const char *type, /* {{{ */
   sstrncpy(vl.plugin_instance, process, sizeof(vl.plugin_instance));
   sstrncpy(vl.type, type, sizeof(vl.type));
 
-  INFO("procevent_sim plugin: dispatching state %d for PID %d (%s)", (int)value,
+  DEBUG("procevent_sim plugin: dispatching state %d for PID %d (%s)", (int)value,
         pid, process);
 
   // Create metadata to store JSON key-values

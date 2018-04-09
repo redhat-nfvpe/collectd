@@ -575,7 +575,7 @@ static void connectivity_submit(const char *dev, const char *type, /* {{{ */
   sstrncpy(vl.plugin_instance, dev, sizeof(vl.plugin_instance));
   sstrncpy(vl.type, type, sizeof(vl.type));
 
-  INFO("connectivity_sim plugin: dispatching state %d for interface %s", (int)value,
+  DEBUG("connectivity_sim plugin: dispatching state %d for interface %s", (int)value,
         dev);
 
   // Create metadata to store JSON key-values
