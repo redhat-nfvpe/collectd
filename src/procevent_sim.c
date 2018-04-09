@@ -127,6 +127,7 @@ static int process_count = 0;
 static circbuf_t ring;
 static processlist_t *processlist_head = NULL;
 static int event_id = 0;
+static const char *process_names[] = {"ovs-vswitchd", "qemu-kvm", "nova-compute", "tuned", "libvirtd", "dockerd", "dnsmasq", "firewalld"};
 
 static const char *config_keys[] = {"BufferLength", "Process", "ChanceTotal", "Chance"};
 static int config_keys_num = STATIC_ARRAY_SIZE(config_keys);
@@ -135,7 +136,7 @@ static int config_keys_num = STATIC_ARRAY_SIZE(config_keys);
  * Private functions
  */
 
-static int gen_metadata_payload(int state, int pid, char *process,
+static int gen_metadata_payload(int state, int pid, const char *process,
                                 long long unsigned int timestamp,
                                 notification_t *n) {
   char tmp_str[DATA_MAX_NAME_LEN];
@@ -822,8 +823,7 @@ static int procevent_init(void) /* {{{ */
   }
 
   if (ignorelist == NULL || ignorelist->head == NULL) {
-    NOTICE("procevent_sim plugin: No processes have been configured.");
-    return (-1);
+    NOTICE("procevent_sim plugin: No processes have been configured, canned names will be used");
   }
 
   srand(time(NULL));
@@ -853,7 +853,7 @@ static int procevent_config(const char *key, const char *value) /* {{{ */
 } /* }}} int procevent_config */
 
 static void procevent_dispatch_notification(int pid, const char *type, /* {{{ */
-                                            gauge_t value, char *process,
+                                            gauge_t value, const char *process,
                                             long long unsigned int timestamp) {
 
   notification_t n = {NOTIF_FAILURE, cdtime(), "", "", "procevent", "", "", "",
@@ -924,34 +924,44 @@ static int procevent_read(void) /* {{{ */
     ignorelist_item_t *this;
     ignorelist_item_t *next_item;
 
-    int stop = (int)(rand() % process_count);
+    int stop = -1;
     int i = 0;
+    const char * choice = NULL;
 
-    for (this = ignorelist->head; this != NULL; this = next_item) {
-      if (i == stop)
-        break;
-      next_item = this->next;
-      i ++;
+    if (ignorelist == NULL || ignorelist->head == NULL) {
+      i = (int)(rand() % 8);
+      choice = process_names[i];
+    } else {
+      stop = (int)(rand() % process_count);
+      for (this = ignorelist->head; this != NULL; this = next_item) {
+        if (i == stop)
+        {
+          choice = this->smatch;
+          break;
+        }
+        next_item = this->next;
+        i ++;
+      }
     }
 
     if (ring.buffer[ring.tail][1] == PROCEVENT_EXITED) {
         procevent_dispatch_notification(ring.buffer[ring.tail][0], "gauge",
-                                        ring.buffer[ring.tail][1], this->smatch,
+                                        ring.buffer[ring.tail][1], choice,
                                         ring.buffer[ring.tail][3]);
         DEBUG("procevent_sim plugin: PID %llu (%s) EXITED, removing PID from process "
               "list",
-              ring.buffer[ring.tail][0], this->smatch);
+              ring.buffer[ring.tail][0], choice);
     } else if (ring.buffer[ring.tail][1] == PROCEVENT_STARTED) {
         // This process is of interest to us, so publish its STARTED status
         procevent_dispatch_notification(ring.buffer[ring.tail][0], "gauge",
-                                        ring.buffer[ring.tail][1], this->smatch,
+                                        ring.buffer[ring.tail][1], choice,
                                         ring.buffer[ring.tail][3]);
         DEBUG(
             "procevent_sim plugin: PID %llu (%s) STARTED, adding PID to process list",
-            ring.buffer[ring.tail][0], this->smatch);
+            ring.buffer[ring.tail][0], choice);
     }
 
-    procevent_submit(ring.buffer[ring.tail][0], "gauge", ring.buffer[ring.tail][1], this->smatch);
+    procevent_submit(ring.buffer[ring.tail][0], "gauge", ring.buffer[ring.tail][1], choice);
 
     ring.tail = next;
   }
