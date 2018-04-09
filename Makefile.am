@@ -571,12 +571,29 @@ connectivity_la_LDFLAGS = $(PLUGIN_LDFLAGS)
 connectivity_la_LIBADD = $(BUILD_WITH_LIBMNL_LIBS) libignorelist.la
 endif
 
+if BUILD_PLUGIN_CONNECTIVITY_SIM
+pkglib_LTLIBRARIES += connectivity_sim.la
+connectivity_sim_la_SOURCES = src/connectivity_sim.c
+connectivity_sim_la_CFLAGS = $(AM_CFLAGS) $(BUILD_WITH_LIBMNL_CFLAGS)
+connectivity_sim_la_CPPFLAGS = $(AM_CPPFLAGS) 
+connectivity_sim_la_LDFLAGS = $(PLUGIN_LDFLAGS)
+connectivity_sim_la_LIBADD = $(BUILD_WITH_LIBMNL_LIBS) libignorelist.la
+endif
+
 if BUILD_PLUGIN_PROCEVENT
 pkglib_LTLIBRARIES += procevent.la
 procevent_la_SOURCES = src/procevent.c
 procevent_la_CPPFLAGS = $(AM_CPPFLAGS) 
 procevent_la_LDFLAGS = $(PLUGIN_LDFLAGS) 
 procevent_la_LIBADD = libignorelist.la
+endif
+
+if BUILD_PLUGIN_PROCEVENT_SIM
+pkglib_LTLIBRARIES += procevent_sim.la
+procevent_sim_la_SOURCES = src/procevent_sim.c
+procevent_sim_la_CPPFLAGS = $(AM_CPPFLAGS) 
+procevent_sim_la_LDFLAGS = $(PLUGIN_LDFLAGS) 
+procevent_sim_la_LIBADD = libignorelist.la
 endif
 
 if BUILD_PLUGIN_SYSEVENT
