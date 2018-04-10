@@ -897,6 +897,8 @@ static void procevent_submit(int pid, const char *type, /* {{{ */
   meta_data_add_string(meta, "entity", process);
 
   plugin_dispatch_values(&vl);
+
+  meta_data_destroy(meta);
 } /* }}} void interface_submit */
 
 static int procevent_read(void) /* {{{ */

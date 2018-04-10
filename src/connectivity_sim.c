@@ -586,6 +586,8 @@ static void connectivity_submit(const char *dev, const char *type, /* {{{ */
   meta_data_add_string(meta, "entity", dev);
 
   plugin_dispatch_values(&vl);
+
+  meta_data_destroy(meta);
 } /* }}} void interface_submit */
 
 static int connectivity_read(void) /* {{{ */
