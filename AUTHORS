@@ -59,6 +59,7 @@ Andreas Henriksson <andreas at fatal.se>
 Andrew Bays <abays at redhat.com>
  - connectivity plugin.
  - procevent plugin.
+ - sysevent plugin.
 
 Andy Parkins <andyp at fussylogic.co.uk>
  - battery plugin: sysfs code.

@@ -6192,6 +6192,7 @@ plugin_serial="no"
 plugin_smart="no"
 plugin_swap="no"
 plugin_synproxy="no"
+plugin_sysevent="no"
 plugin_tape="no"
 plugin_tcpconns="no"
 plugin_ted="no"
@@ -6261,6 +6262,7 @@ if test "x$ac_system" = "xLinux"; then
     plugin_ovs_events="yes"
     plugin_ovs_stats="yes"
     plugin_procevent="yes"
+    plugin_sysevent="yes"
 
     if test "x$with_libmnl" = "xyes"; then
       plugin_connectivity="yes"
@@ -6369,6 +6371,7 @@ fi
 
 if test "x$with_libyajl" = "xyes"; then
   plugin_ceph="yes"
+  plugin_sysevent="yes"
 fi
 
 if test "x$have_processor_info" = "xyes"; then
@@ -6658,6 +6661,7 @@ AC_PLUGIN([snmp_agent],          [$with_libnetsnmpagent],   [SNMP agent plugin])
 AC_PLUGIN([statsd],              [yes],                     [StatsD plugin])
 AC_PLUGIN([swap],                [$plugin_swap],            [Swap usage statistics])
 AC_PLUGIN([synproxy],            [$plugin_synproxy],        [Synproxy stats plugin])
+AC_PLUGIN([sysevent],            [$plugin_sysevent],        [rsyslog events])
 AC_PLUGIN([syslog],              [$have_syslog],            [Syslog logging plugin])
 AC_PLUGIN([table],               [yes],                     [Parsing of tabular data])
 AC_PLUGIN([tail],                [yes],                     [Parsing of logfiles])
@@ -7080,6 +7084,7 @@ AC_MSG_RESULT([    snmp_agent  . . . . . $enable_snmp_agent])
 AC_MSG_RESULT([    statsd  . . . . . . . $enable_statsd])
 AC_MSG_RESULT([    swap  . . . . . . . . $enable_swap])
 AC_MSG_RESULT([    synproxy  . . . . . . $enable_synproxy])
+AC_MSG_RESULT([    sysevent. . . . . . . $enable_sysevent])
 AC_MSG_RESULT([    syslog  . . . . . . . $enable_syslog])
 AC_MSG_RESULT([    table . . . . . . . . $enable_table])
 AC_MSG_RESULT([    tail_csv  . . . . . . $enable_tail_csv])
