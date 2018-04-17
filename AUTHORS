@@ -58,12 +58,14 @@ Andreas Henriksson <andreas at fatal.se>
 
 Andrew Bays <abays at redhat.com>
  - connectivity plugin.
+ - procevent plugin.
 
 Andy Parkins <andyp at fussylogic.co.uk>
  - battery plugin: sysfs code.
 
 Andy Smith <ansmith at redhat.com>
  - AMQP 1.0 plugin.
+
 Aneesh Puttur <aputtur at redhat.com>
  - connectivity plugin.
 
