@@ -6197,6 +6197,7 @@ if test "x$ac_system" = "xLinux"; then
   plugin_nfs="yes"
   plugin_numa="yes"
   plugin_processes="yes"
+  plugin_procevent="yes"
   plugin_protocols="yes"
   plugin_serial="yes"
   plugin_swap="yes"
@@ -6224,7 +6225,6 @@ if test "x$ac_system" = "xLinux"; then
   if test "x$with_libyajl" = "xyes" && test "x$with_libyajl2" = "xyes"; then
     plugin_ovs_events="yes"
     plugin_ovs_stats="yes"
-    plugin_procevent="yes"
   fi
 fi
 
