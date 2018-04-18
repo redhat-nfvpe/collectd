@@ -164,6 +164,7 @@ static int gen_metadata_payload(const char *msg, char *sev, int sev_num,
     goto err;
 
   // eventName
+
   int event_name_len = 0;
   event_name_len = event_name_len + strlen(host); // host name
   event_name_len =

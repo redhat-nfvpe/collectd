@@ -90,6 +90,7 @@
 
 #@BUILD_PLUGIN_AGGREGATION_TRUE@LoadPlugin aggregation
 #@BUILD_PLUGIN_AMQP_TRUE@LoadPlugin amqp
+#@BUILD_PLUGIN_AMQP1_TRUE@LoadPlugin amqp1
 #@BUILD_PLUGIN_APACHE_TRUE@LoadPlugin apache
 #@BUILD_PLUGIN_APCUPS_TRUE@LoadPlugin apcups
 #@BUILD_PLUGIN_APPLE_SENSORS_TRUE@LoadPlugin apple_sensors
@@ -101,6 +102,7 @@
 #@BUILD_PLUGIN_CEPH_TRUE@LoadPlugin ceph
 #@BUILD_PLUGIN_CGROUPS_TRUE@LoadPlugin cgroups
 #@BUILD_PLUGIN_CHRONY_TRUE@LoadPlugin chrony
+#@BUILD_PLUGIN_CONNECTIVITY_TRUE@LoadPlugin connectivity
 #@BUILD_PLUGIN_CONNTRACK_TRUE@LoadPlugin conntrack
 #@BUILD_PLUGIN_CONTEXTSWITCH_TRUE@LoadPlugin contextswitch
 @BUILD_PLUGIN_CPU_TRUE@@BUILD_PLUGIN_CPU_TRUE@LoadPlugin cpu
@@ -178,6 +180,7 @@
 #@BUILD_PLUGIN_POSTGRESQL_TRUE@LoadPlugin postgresql
 #@BUILD_PLUGIN_POWERDNS_TRUE@LoadPlugin powerdns
 #@BUILD_PLUGIN_PROCESSES_TRUE@LoadPlugin processes
+#@BUILD_PLUGIN_PROCEVENT_TRUE@LoadPlugin procevent
 #@BUILD_PLUGIN_PROTOCOLS_TRUE@LoadPlugin protocols
 #@BUILD_PLUGIN_PYTHON_TRUE@LoadPlugin python
 #@BUILD_PLUGIN_REDIS_TRUE@LoadPlugin redis
@@ -270,6 +273,29 @@
 #  </Publish>
 #</Plugin>
 
+#<Plugin amqp1>
+#  <Transport "name">
+#    Host "localhost"
+#    Port "5672"
+#    User "guest"
+#    Password "guest"
+#    Address "collectd"
+#    RetryDelay 1
+#    <Instance "log">
+#        Format JSON
+#        PreSettle false
+#    </Instance>
+#    <Instance "notify">
+#        Format JSON
+#        PreSettle true
+#    </Instance>
+#    <Instance "telemetry">
+#        Format JSON
+#        PreSettle false
+#    </Instance>
+#  </Transport>
+#</Plugin>
+
 #<Plugin apache>
 #  <Instance "local">
 #    URL "http://localhost/status?auto"
@@ -354,6 +380,10 @@
 #	Host    "localhost"
 #	Port    "323"
 #	Timeout "2"
+#</Plugin>
+
+#<Plugin connectivity>
+#  Interface eth0
 #</Plugin>
 
 #<Plugin cgroups>
@@ -1214,6 +1244,12 @@
 #		CollectFileDescriptor false
 #		CollectContextSwitch true
 #	</Process>
+#</Plugin>
+
+#<Plugin "procevent">
+#  BufferLength 10
+#  RegexProcess "/^ovs.*$/" 
+#  Process tuned
 #</Plugin>
 
 #<Plugin protocols>

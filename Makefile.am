@@ -542,6 +542,18 @@ amqp_la_LIBADD = \
 	libformat_json.la
 endif
 
+if BUILD_PLUGIN_AMQP1
+pkglib_LTLIBRARIES += amqp1.la
+amqp1_la_SOURCES = src/amqp1.c
+amqp1_la_CPPFLAGS = $(AM_CPPFLAGS) $(BUILD_WITH_LIBQPIDPROTON_CPPFLAGS)
+amqp1_la_LDFLAGS = $(PLUGIN_LDFLAGS) $(BUILD_WITH_LIBQPIDPROTON_LDFLAGS)
+amqp1_la_LIBADD = \
+	$(BUILD_WITH_LIBQPIDPROTON_LIBS) \
+	libcmds.la \
+	libformat_graphite.la \
+	libformat_json.la
+endif
+
 if BUILD_PLUGIN_APACHE
 pkglib_LTLIBRARIES += apache.la
 apache_la_SOURCES = src/apache.c
@@ -635,6 +647,15 @@ pkglib_LTLIBRARIES += chrony.la
 chrony_la_SOURCES = src/chrony.c
 chrony_la_LDFLAGS = $(PLUGIN_LDFLAGS)
 chrony_la_LIBADD = -lm
+endif
+
+if BUILD_PLUGIN_CONNECTIVITY
+pkglib_LTLIBRARIES += connectivity.la
+connectivity_la_SOURCES = src/connectivity.c
+connectivity_la_CFLAGS = $(AM_CFLAGS) $(BUILD_WITH_LIBMNL_CFLAGS)
+connectivity_la_CPPFLAGS = $(AM_CPPFLAGS) $(BUILD_WITH_LIBYAJL_CPPFLAGS)
+connectivity_la_LDFLAGS = $(PLUGIN_LDFLAGS) $(BUILD_WITH_LIBYAJL_LDFLAGS)
+connectivity_la_LIBADD = $(BUILD_WITH_LIBYAJL_LIBS) $(BUILD_WITH_LIBMNL_LIBS) libignorelist.la
 endif
 
 if BUILD_PLUGIN_CONNTRACK
@@ -1444,6 +1465,14 @@ if HAVE_LIBMNL
 processes_la_CPPFLAGS += -DHAVE_LIBTASKSTATS=1
 processes_la_LIBADD += libtaskstats.la
 endif
+endif
+
+if BUILD_PLUGIN_PROCEVENT
+pkglib_LTLIBRARIES += procevent.la
+procevent_la_SOURCES = src/procevent.c
+procevent_la_CPPFLAGS = $(AM_CPPFLAGS) $(BUILD_WITH_LIBYAJL_CPPFLAGS)
+procevent_la_LDFLAGS = $(PLUGIN_LDFLAGS) $(BUILD_WITH_LIBYAJL_LDFLAGS)
+procevent_la_LIBADD = $(BUILD_WITH_LIBYAJL_LIBS) libignorelist.la
 endif
 
 if BUILD_PLUGIN_PROTOCOLS
