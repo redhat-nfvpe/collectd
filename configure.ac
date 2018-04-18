@@ -6224,10 +6224,6 @@ if test "x$ac_system" = "xLinux"; then
   if test "x$with_libyajl" = "xyes" && test "x$with_libyajl2" = "xyes"; then
     plugin_ovs_events="yes"
     plugin_ovs_stats="yes"
-
-    if test "x$with_libmnl" = "xyes"; then
-      plugin_connectivity="yes"
-    fi
   fi
 fi
 
@@ -6332,6 +6328,10 @@ fi
 
 if test "x$with_libyajl" = "xyes"; then
   plugin_ceph="yes"
+fi
+
+if test "x$with_libmnl" = "xyes"; then
+  plugin_connectivity="yes"
 fi
 
 if test "x$have_processor_info" = "xyes"; then
