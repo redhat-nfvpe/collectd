@@ -251,6 +251,7 @@ static int gen_metadata_payload(int state, int pid, char *process,
   alarm_condition_len =
       alarm_condition_len + 25; // "process", "state", "change", 4 spaces, 2
                                 // parentheses and null-terminator
+
   memset(tmp_str, '\0', DATA_MAX_NAME_LEN);
   snprintf(tmp_str, alarm_condition_len, "process %s (%d) state change",
            process, pid);
