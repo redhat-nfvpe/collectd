@@ -48,15 +48,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <yajl/yajl_common.h>
-#include <yajl/yajl_gen.h>
-#if HAVE_YAJL_YAJL_VERSION_H
-#include <yajl/yajl_version.h>
-#endif
-#if defined(YAJL_MAJOR) && (YAJL_MAJOR > 1)
-#define HAVE_YAJL_V2 1
-#endif
-
 #define PROCEVENT_EXITED 0
 #define PROCEVENT_STARTED 1
 #define PROCEVENT_FIELDS 4 // pid, status, extra, timestamp
@@ -75,11 +66,11 @@
 #define PROCEVENT_REPORTING_ENTITY_NAME_FIELD "reportingEntityName"
 #define PROCEVENT_REPORTING_ENTITY_NAME_VALUE "collectd procevent plugin"
 #define PROCEVENT_SEQUENCE_FIELD "sequence"
-#define PROCEVENT_SEQUENCE_VALUE "0"
+#define PROCEVENT_SEQUENCE_VALUE 0
 #define PROCEVENT_SOURCE_NAME_FIELD "sourceName"
 #define PROCEVENT_START_EPOCH_MICROSEC_FIELD "startEpochMicrosec"
 #define PROCEVENT_VERSION_FIELD "version"
-#define PROCEVENT_VERSION_VALUE "1.0"
+#define PROCEVENT_VERSION_VALUE 1.0
 
 #define PROCEVENT_ALARM_CONDITION_FIELD "alarmCondition"
 #define PROCEVENT_ALARM_INTERFACE_A_FIELD "alarmInterfaceA"
@@ -90,7 +81,7 @@
 #define PROCEVENT_EVENT_SOURCE_TYPE_VALUE "process"
 #define PROCEVENT_FAULT_FIELDS_FIELD "faultFields"
 #define PROCEVENT_FAULT_FIELDS_VERSION_FIELD "faultFieldsVersion"
-#define PROCEVENT_FAULT_FIELDS_VERSION_VALUE "1.0"
+#define PROCEVENT_FAULT_FIELDS_VERSION_VALUE 1.0
 #define PROCEVENT_SPECIFIC_PROBLEM_FIELD "specificProblem"
 #define PROCEVENT_SPECIFIC_PROBLEM_DOWN_VALUE "down"
 #define PROCEVENT_SPECIFIC_PROBLEM_UP_VALUE "up"
@@ -142,176 +133,117 @@ static int config_keys_num = STATIC_ARRAY_SIZE(config_keys);
  * Private functions
  */
 
-static int gen_message_payload(int state, int pid, char *process,
-                               long long unsigned int timestamp, char **buf) {
-  const unsigned char *buf2;
-  yajl_gen g;
-  char json_str[DATA_MAX_NAME_LEN];
-
-#if !defined(HAVE_YAJL_V2)
-  yajl_gen_config conf = {};
-
-  conf.beautify = 0;
-#endif
-
-#if HAVE_YAJL_V2
-  size_t len;
-  g = yajl_gen_alloc(NULL);
-  yajl_gen_config(g, yajl_gen_beautify, 0);
-#else
-  unsigned int len;
-  g = yajl_gen_alloc(&conf, NULL);
-#endif
-
-  yajl_gen_clear(g);
+static int gen_metadata_payload(int state, int pid, char *process,
+                                long long unsigned int timestamp,
+                                notification_t *n) {
+  char tmp_str[DATA_MAX_NAME_LEN];
+  notification_meta_t *header = NULL;
+  notification_meta_t *domain = NULL;
 
   // *** BEGIN common event header ***
 
-  if (yajl_gen_map_open(g) != yajl_gen_status_ok)
+  // Add the object as "ves" to the notification's meta (the notification's meta
+  // will be created by this call, and it will be the VES header)
+
+  if (plugin_notification_meta_add_nested(n, "ves") != 0)
     goto err;
 
-  // domain
-  if (yajl_gen_string(g, (u_char *)PROCEVENT_DOMAIN_FIELD,
-                      strlen(PROCEVENT_DOMAIN_FIELD)) != yajl_gen_status_ok)
+  // Now populate the VES header, but first we need to acquire it
+  if (plugin_notification_meta_get_meta_tail(n, &header) != 0)
     goto err;
 
-  if (yajl_gen_string(g, (u_char *)PROCEVENT_DOMAIN_VALUE,
-                      strlen(PROCEVENT_DOMAIN_VALUE)) != yajl_gen_status_ok)
-    goto err;
-
-  // eventId
-  if (yajl_gen_string(g, (u_char *)PROCEVENT_EVENT_ID_FIELD,
-                      strlen(PROCEVENT_EVENT_ID_FIELD)) != yajl_gen_status_ok)
-    goto err;
-
-  event_id = event_id + 1;
-  int event_id_len = sizeof(char) * sizeof(int) * 4 + 1;
-  memset(json_str, '\0', DATA_MAX_NAME_LEN);
-  snprintf(json_str, event_id_len, "%d", event_id);
-
-  if (yajl_gen_number(g, json_str, strlen(json_str)) != yajl_gen_status_ok) {
+  if (header == NULL) {
+    ERROR(
+        "procevent plugin: gen_metadata_payload could not acquire VES header.");
     goto err;
   }
 
-  // eventName
-  if (yajl_gen_string(g, (u_char *)PROCEVENT_EVENT_NAME_FIELD,
-                      strlen(PROCEVENT_EVENT_NAME_FIELD)) != yajl_gen_status_ok)
+  // domain
+  if (plugin_notification_meta_append_string(header, PROCEVENT_DOMAIN_FIELD,
+                                             PROCEVENT_DOMAIN_VALUE) != 0)
     goto err;
 
+  // eventId
+  event_id = event_id + 1;
+
+  if (plugin_notification_meta_append_unsigned_int(
+          header, PROCEVENT_EVENT_ID_FIELD, event_id) != 0)
+    goto err;
+
+  // eventName
   int event_name_len = 0;
   event_name_len = event_name_len + (sizeof(char) * sizeof(int) * 4); // pid
   event_name_len = event_name_len + strlen(process);      // process name
   event_name_len = event_name_len + (state == 0 ? 4 : 2); // "down" or "up"
   event_name_len = event_name_len +
                    13; // "process", 3 spaces, 2 parentheses and null-terminator
-  memset(json_str, '\0', DATA_MAX_NAME_LEN);
-  snprintf(json_str, event_name_len, "process %s (%d) %s", process, pid,
+  memset(tmp_str, '\0', DATA_MAX_NAME_LEN);
+  snprintf(tmp_str, event_name_len, "process %s (%d) %s", process, pid,
            (state == 0 ? PROCEVENT_EVENT_NAME_DOWN_VALUE
                        : PROCEVENT_EVENT_NAME_UP_VALUE));
 
-  if (yajl_gen_string(g, (u_char *)json_str, strlen(json_str)) !=
-      yajl_gen_status_ok) {
+  if (plugin_notification_meta_append_string(header, PROCEVENT_EVENT_NAME_FIELD,
+                                             tmp_str) != 0)
     goto err;
-  }
 
   // lastEpochMicrosec
-  if (yajl_gen_string(g, (u_char *)PROCEVENT_LAST_EPOCH_MICROSEC_FIELD,
-                      strlen(PROCEVENT_LAST_EPOCH_MICROSEC_FIELD)) !=
-      yajl_gen_status_ok)
+  if (plugin_notification_meta_append_unsigned_int(
+          header, PROCEVENT_LAST_EPOCH_MICROSEC_FIELD,
+          (long long unsigned int)CDTIME_T_TO_US(cdtime())) != 0)
     goto err;
-
-  int last_epoch_microsec_len =
-      sizeof(char) * sizeof(long long unsigned int) * 4 + 1;
-  memset(json_str, '\0', DATA_MAX_NAME_LEN);
-  snprintf(json_str, last_epoch_microsec_len, "%llu",
-           (long long unsigned int)CDTIME_T_TO_US(cdtime()));
-
-  if (yajl_gen_number(g, json_str, strlen(json_str)) != yajl_gen_status_ok) {
-    goto err;
-  }
 
   // priority
-  if (yajl_gen_string(g, (u_char *)PROCEVENT_PRIORITY_FIELD,
-                      strlen(PROCEVENT_PRIORITY_FIELD)) != yajl_gen_status_ok)
-    goto err;
-
-  if (yajl_gen_string(g, (u_char *)PROCEVENT_PRIORITY_VALUE,
-                      strlen(PROCEVENT_PRIORITY_VALUE)) != yajl_gen_status_ok)
+  if (plugin_notification_meta_append_string(header, PROCEVENT_PRIORITY_FIELD,
+                                             PROCEVENT_PRIORITY_VALUE) != 0)
     goto err;
 
   // reportingEntityName
-  if (yajl_gen_string(g, (u_char *)PROCEVENT_REPORTING_ENTITY_NAME_FIELD,
-                      strlen(PROCEVENT_REPORTING_ENTITY_NAME_FIELD)) !=
-      yajl_gen_status_ok)
-    goto err;
+  if (plugin_notification_meta_append_string(
+          header, PROCEVENT_REPORTING_ENTITY_NAME_FIELD,
+          PROCEVENT_REPORTING_ENTITY_NAME_VALUE) != 0)
 
-  if (yajl_gen_string(g, (u_char *)PROCEVENT_REPORTING_ENTITY_NAME_VALUE,
-                      strlen(PROCEVENT_REPORTING_ENTITY_NAME_VALUE)) !=
-      yajl_gen_status_ok)
-    goto err;
-
-  // sequence
-  if (yajl_gen_string(g, (u_char *)PROCEVENT_SEQUENCE_FIELD,
-                      strlen(PROCEVENT_SEQUENCE_FIELD)) != yajl_gen_status_ok)
-    goto err;
-
-  if (yajl_gen_number(g, PROCEVENT_SEQUENCE_VALUE,
-                      strlen(PROCEVENT_SEQUENCE_VALUE)) != yajl_gen_status_ok)
-    goto err;
+    // sequence
+    if (plugin_notification_meta_append_unsigned_int(
+            header, PROCEVENT_SEQUENCE_FIELD,
+            (unsigned int)PROCEVENT_SEQUENCE_VALUE) != 0)
+      goto err;
 
   // sourceName
-  if (yajl_gen_string(g, (u_char *)PROCEVENT_SOURCE_NAME_FIELD,
-                      strlen(PROCEVENT_SOURCE_NAME_FIELD)) !=
-      yajl_gen_status_ok)
-    goto err;
+  if (plugin_notification_meta_append_string(
+          header, PROCEVENT_SOURCE_NAME_FIELD, process) != 0)
 
-  if (yajl_gen_string(g, (u_char *)process, strlen(process)) !=
-      yajl_gen_status_ok)
-    goto err;
-
-  // startEpochMicrosec
-  if (yajl_gen_string(g, (u_char *)PROCEVENT_START_EPOCH_MICROSEC_FIELD,
-                      strlen(PROCEVENT_START_EPOCH_MICROSEC_FIELD)) !=
-      yajl_gen_status_ok)
-    goto err;
-
-  int start_epoch_microsec_len =
-      sizeof(char) * sizeof(long long unsigned int) * 4 + 1;
-  memset(json_str, '\0', DATA_MAX_NAME_LEN);
-  snprintf(json_str, start_epoch_microsec_len, "%llu",
-           (long long unsigned int)timestamp);
-
-  if (yajl_gen_number(g, json_str, strlen(json_str)) != yajl_gen_status_ok) {
-    goto err;
-  }
+    // startEpochMicrosec
+    if (plugin_notification_meta_append_unsigned_int(
+            header, PROCEVENT_START_EPOCH_MICROSEC_FIELD,
+            (long long unsigned int)timestamp) != 0)
+      goto err;
 
   // version
-  if (yajl_gen_string(g, (u_char *)PROCEVENT_VERSION_FIELD,
-                      strlen(PROCEVENT_VERSION_FIELD)) != yajl_gen_status_ok)
-    goto err;
-
-  if (yajl_gen_number(g, PROCEVENT_VERSION_VALUE,
-                      strlen(PROCEVENT_VERSION_VALUE)) != yajl_gen_status_ok)
+  if (plugin_notification_meta_append_double(header, PROCEVENT_VERSION_FIELD,
+                                             PROCEVENT_VERSION_VALUE) != 0)
     goto err;
 
   // *** END common event header ***
 
   // *** BEGIN fault fields ***
 
-  if (yajl_gen_string(g, (u_char *)PROCEVENT_FAULT_FIELDS_FIELD,
-                      strlen(PROCEVENT_FAULT_FIELDS_FIELD)) !=
-      yajl_gen_status_ok)
+  // Append a nested metadata object to header, with key as "faultFields",
+  // and then find it.  We will then append children data to it.
+
+  if (plugin_notification_meta_append_nested(header,
+                                             PROCEVENT_FAULT_FIELDS_FIELD) != 0)
     goto err;
 
-  if (yajl_gen_map_open(g) != yajl_gen_status_ok)
+  if (plugin_notification_meta_get_nested_tail(header, &domain) != 0)
     goto err;
+
+  if (domain == NULL) {
+    ERROR(
+        "procevent plugin: gen_metadata_payload could not acquire VES domain.");
+    goto err;
+  }
 
   // alarmCondition
-  if (yajl_gen_string(g, (u_char *)PROCEVENT_ALARM_CONDITION_FIELD,
-                      strlen(PROCEVENT_ALARM_CONDITION_FIELD)) !=
-      yajl_gen_status_ok)
-    goto err;
-
   int alarm_condition_len = 0;
   alarm_condition_len =
       alarm_condition_len + (sizeof(char) * sizeof(int) * 4);  // pid
@@ -319,67 +251,40 @@ static int gen_message_payload(int state, int pid, char *process,
   alarm_condition_len =
       alarm_condition_len + 25; // "process", "state", "change", 4 spaces, 2
                                 // parentheses and null-terminator
-  memset(json_str, '\0', DATA_MAX_NAME_LEN);
-  snprintf(json_str, alarm_condition_len, "process %s (%d) state change",
+
+  memset(tmp_str, '\0', DATA_MAX_NAME_LEN);
+  snprintf(tmp_str, alarm_condition_len, "process %s (%d) state change",
            process, pid);
 
-  if (yajl_gen_string(g, (u_char *)json_str, strlen(json_str)) !=
-      yajl_gen_status_ok) {
+  if (plugin_notification_meta_append_string(
+          domain, PROCEVENT_ALARM_CONDITION_FIELD, tmp_str) != 0)
     goto err;
-  }
 
   // alarmInterfaceA
-  if (yajl_gen_string(g, (u_char *)PROCEVENT_ALARM_INTERFACE_A_FIELD,
-                      strlen(PROCEVENT_ALARM_INTERFACE_A_FIELD)) !=
-      yajl_gen_status_ok)
-    goto err;
-
-  if (yajl_gen_string(g, (u_char *)process, strlen(process)) !=
-      yajl_gen_status_ok)
+  if (plugin_notification_meta_append_string(
+          domain, PROCEVENT_ALARM_INTERFACE_A_FIELD, process) != 0)
     goto err;
 
   // eventSeverity
-  if (yajl_gen_string(g, (u_char *)PROCEVENT_EVENT_SEVERITY_FIELD,
-                      strlen(PROCEVENT_EVENT_SEVERITY_FIELD)) !=
-      yajl_gen_status_ok)
-    goto err;
-
-  if (yajl_gen_string(
-          g, (u_char *)(state == 0 ? PROCEVENT_EVENT_SEVERITY_CRITICAL_VALUE
-                                   : PROCEVENT_EVENT_SEVERITY_NORMAL_VALUE),
-          strlen((state == 0 ? PROCEVENT_EVENT_SEVERITY_CRITICAL_VALUE
-                             : PROCEVENT_EVENT_SEVERITY_NORMAL_VALUE))) !=
-      yajl_gen_status_ok)
+  if (plugin_notification_meta_append_string(
+          domain, PROCEVENT_EVENT_SEVERITY_FIELD,
+          (state == 0 ? PROCEVENT_EVENT_SEVERITY_CRITICAL_VALUE
+                      : PROCEVENT_EVENT_SEVERITY_NORMAL_VALUE)) != 0)
     goto err;
 
   // eventSourceType
-  if (yajl_gen_string(g, (u_char *)PROCEVENT_EVENT_SOURCE_TYPE_FIELD,
-                      strlen(PROCEVENT_EVENT_SOURCE_TYPE_FIELD)) !=
-      yajl_gen_status_ok)
-    goto err;
-
-  if (yajl_gen_string(g, (u_char *)PROCEVENT_EVENT_SOURCE_TYPE_VALUE,
-                      strlen(PROCEVENT_EVENT_SOURCE_TYPE_VALUE)) !=
-      yajl_gen_status_ok)
+  if (plugin_notification_meta_append_string(
+          domain, PROCEVENT_EVENT_SOURCE_TYPE_FIELD,
+          PROCEVENT_EVENT_SOURCE_TYPE_VALUE) != 0)
     goto err;
 
   // faultFieldsVersion
-  if (yajl_gen_string(g, (u_char *)PROCEVENT_FAULT_FIELDS_VERSION_FIELD,
-                      strlen(PROCEVENT_FAULT_FIELDS_VERSION_FIELD)) !=
-      yajl_gen_status_ok)
-    goto err;
-
-  if (yajl_gen_number(g, PROCEVENT_FAULT_FIELDS_VERSION_VALUE,
-                      strlen(PROCEVENT_FAULT_FIELDS_VERSION_VALUE)) !=
-      yajl_gen_status_ok)
+  if (plugin_notification_meta_append_double(
+          domain, PROCEVENT_FAULT_FIELDS_VERSION_FIELD,
+          PROCEVENT_FAULT_FIELDS_VERSION_VALUE) != 0)
     goto err;
 
   // specificProblem
-  if (yajl_gen_string(g, (u_char *)PROCEVENT_SPECIFIC_PROBLEM_FIELD,
-                      strlen(PROCEVENT_SPECIFIC_PROBLEM_FIELD)) !=
-      yajl_gen_status_ok)
-    goto err;
-
   int specific_problem_len = 0;
   specific_problem_len =
       specific_problem_len + (sizeof(char) * sizeof(int) * 4);   // pid
@@ -389,58 +294,28 @@ static int gen_message_payload(int state, int pid, char *process,
   specific_problem_len =
       specific_problem_len +
       13; // "process", 3 spaces, 2 parentheses and null-terminator
-  memset(json_str, '\0', DATA_MAX_NAME_LEN);
-  snprintf(json_str, specific_problem_len, "process %s (%d) %s", process, pid,
+  memset(tmp_str, '\0', DATA_MAX_NAME_LEN);
+  snprintf(tmp_str, specific_problem_len, "process %s (%d) %s", process, pid,
            (state == 0 ? PROCEVENT_SPECIFIC_PROBLEM_DOWN_VALUE
                        : PROCEVENT_SPECIFIC_PROBLEM_UP_VALUE));
 
-  if (yajl_gen_string(g, (u_char *)json_str, strlen(json_str)) !=
-      yajl_gen_status_ok) {
+  if (plugin_notification_meta_append_string(
+          domain, PROCEVENT_SPECIFIC_PROBLEM_FIELD, tmp_str) != 0)
     goto err;
-  }
 
   // vfStatus
-  if (yajl_gen_string(g, (u_char *)PROCEVENT_VF_STATUS_FIELD,
-                      strlen(PROCEVENT_VF_STATUS_FIELD)) != yajl_gen_status_ok)
-    goto err;
-
-  if (yajl_gen_string(
-          g, (u_char *)(state == 0 ? PROCEVENT_VF_STATUS_CRITICAL_VALUE
-                                   : PROCEVENT_VF_STATUS_NORMAL_VALUE),
-          strlen((state == 0 ? PROCEVENT_VF_STATUS_CRITICAL_VALUE
-                             : PROCEVENT_VF_STATUS_NORMAL_VALUE))) !=
-      yajl_gen_status_ok)
-    goto err;
-
-  if (yajl_gen_map_close(g) != yajl_gen_status_ok)
+  if (plugin_notification_meta_append_string(
+          domain, PROCEVENT_VF_STATUS_FIELD,
+          (state == 0 ? PROCEVENT_VF_STATUS_CRITICAL_VALUE
+                      : PROCEVENT_VF_STATUS_NORMAL_VALUE)) != 0)
     goto err;
 
   // *** END fault fields ***
 
-  if (yajl_gen_map_close(g) != yajl_gen_status_ok)
-    goto err;
-
-  if (yajl_gen_get_buf(g, &buf2, &len) != yajl_gen_status_ok)
-    goto err;
-
-  *buf = malloc(strlen((char *)buf2) + 1);
-
-  if (*buf == NULL) {
-    char errbuf[1024];
-    ERROR("procevent plugin: malloc failed during gen_message_payload: %s",
-          sstrerror(errno, errbuf, sizeof(errbuf)));
-    goto err;
-  }
-
-  sstrncpy(*buf, (char *)buf2, strlen((char *)buf2) + 1);
-
-  yajl_gen_free(g);
-
   return 0;
 
 err:
-  yajl_gen_free(g);
-  ERROR("procevent plugin: gen_message_payload failed to generate JSON");
+  ERROR("procevent plugin: gen_metadata_payload failed to generate metadata");
   return -1;
 }
 
@@ -1028,7 +903,7 @@ static int procevent_config(const char *key, const char *value) /* {{{ */
 static void procevent_dispatch_notification(int pid, const char *type, /* {{{ */
                                             gauge_t value, char *process,
                                             long long unsigned int timestamp) {
-  char *buf = NULL;
+
   notification_t n = {NOTIF_FAILURE, cdtime(), "", "", "procevent", "", "", "",
                       NULL};
 
@@ -1040,35 +915,13 @@ static void procevent_dispatch_notification(int pid, const char *type, /* {{{ */
   sstrncpy(n.type, "gauge", sizeof(n.type));
   sstrncpy(n.type_instance, "process_status", sizeof(n.type_instance));
 
-  gen_message_payload(value, pid, process, timestamp, &buf);
-
-  notification_meta_t *m = calloc(1, sizeof(*m));
-
-  if (m == NULL) {
-    char errbuf[1024];
-    sfree(buf);
-    ERROR("procevent plugin: unable to allocate metadata: %s",
-          sstrerror(errno, errbuf, sizeof(errbuf)));
-    return;
-  }
-
-  sstrncpy(m->name, "ves", sizeof(m->name));
-  m->nm_value.nm_string = sstrdup(buf);
-  m->type = NM_TYPE_STRING;
-  n.meta = m;
-
-  DEBUG("procevent plugin: notification message: %s",
-        n.meta->nm_value.nm_string);
+  gen_metadata_payload(value, pid, process, timestamp, &n);
 
   DEBUG("procevent plugin: dispatching state %d for PID %d (%s)", (int)value,
         pid, process);
 
   plugin_dispatch_notification(&n);
   plugin_notification_meta_free(n.meta);
-
-  // malloc'd in gen_message_payload
-  if (buf != NULL)
-    sfree(buf);
 }
 
 static int procevent_read(void) /* {{{ */

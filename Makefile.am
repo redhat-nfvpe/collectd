@@ -1443,14 +1443,36 @@ python_la_CPPFLAGS = $(AM_CPPFLAGS) $(LIBPYTHON_CPPFLAGS)
 python_la_LDFLAGS = $(PLUGIN_LDFLAGS) $(LIBPYTHON_LDFLAGS)
 endif
 
+if HAVE_LIBMNL
+noinst_LTLIBRARIES += libtaskstats.la
+libtaskstats_la_SOURCES = \
+	src/utils_taskstats.c \
+	src/utils_taskstats.h
+libtaskstats_la_CFLAGS = $(AM_CFLAGS) $(BUILD_WITH_LIBMNL_CFLAGS)
+libtaskstats_la_LIBADD = $(BUILD_WITH_LIBMNL_LIBS)
+endif
+
 if BUILD_PLUGIN_PROCESSES
 pkglib_LTLIBRARIES += processes.la
 processes_la_SOURCES = src/processes.c
+processes_la_CPPFLAGS = $(AM_CPPFLAGS)
 processes_la_LDFLAGS = $(PLUGIN_LDFLAGS)
 processes_la_LIBADD =
 if BUILD_WITH_LIBKVM_GETPROCS
 processes_la_LIBADD += -lkvm
 endif
+if HAVE_LIBMNL
+processes_la_CPPFLAGS += -DHAVE_LIBTASKSTATS=1
+processes_la_LIBADD += libtaskstats.la
+endif
+endif
+
+if BUILD_PLUGIN_PROCEVENT
+pkglib_LTLIBRARIES += procevent.la
+procevent_la_SOURCES = src/procevent.c
+procevent_la_CPPFLAGS = $(AM_CPPFLAGS)
+procevent_la_LDFLAGS = $(PLUGIN_LDFLAGS)
+procevent_la_LIBADD = libignorelist.la
 endif
 
 if BUILD_PLUGIN_PROCEVENT
