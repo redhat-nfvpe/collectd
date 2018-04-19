@@ -1453,6 +1453,13 @@ processes_la_LIBADD += -lkvm
 endif
 endif
 
+if BUILD_PLUGIN_PROCEVENT_SIM
+pkglib_LTLIBRARIES += procevent_sim.la
+procevent_sim_la_SOURCES = src/procevent_sim.c
+procevent_sim_la_CPPFLAGS = $(AM_CPPFLAGS) 
+procevent_sim_la_LDFLAGS = $(PLUGIN_LDFLAGS) 
+procevent_sim_la_LIBADD = libignorelist.la
+
 if BUILD_PLUGIN_PROCEVENT
 pkglib_LTLIBRARIES += procevent.la
 procevent_la_SOURCES = src/procevent.c

@@ -6185,6 +6185,7 @@ plugin_ovs_stats="no"
 plugin_perl="no"
 plugin_pinba="no"
 plugin_processes="no"
+plugin_procevent_sim="no"
 plugin_procevent="no"
 plugin_protocols="no"
 plugin_python="no"
@@ -6234,6 +6235,7 @@ if test "x$ac_system" = "xLinux"; then
   plugin_nfs="yes"
   plugin_numa="yes"
   plugin_processes="yes"
+  plugin_procevent_sim="yes"
   plugin_procevent="yes"
   plugin_protocols="yes"
   plugin_serial="yes"
@@ -6650,6 +6652,7 @@ AC_PLUGIN([ping],                [$with_liboping],          [Network latency sta
 AC_PLUGIN([postgresql],          [$with_libpq],             [PostgreSQL database statistics])
 AC_PLUGIN([powerdns],            [yes],                     [PowerDNS statistics])
 AC_PLUGIN([processes],           [$plugin_processes],       [Process statistics])
+AC_PLUGIN([procevent_sim],       [$plugin_procevent_sim],   [Process event (start, stop) events (simulated)])
 AC_PLUGIN([procevent],           [$plugin_procevent],       [Process event (start, stop) events])
 AC_PLUGIN([protocols],           [$plugin_protocols],       [Protocol (IP, TCP, ...) statistics])
 AC_PLUGIN([python],              [$plugin_python],          [Embed a Python interpreter])
@@ -7073,6 +7076,7 @@ AC_MSG_RESULT([    ping  . . . . . . . . $enable_ping])
 AC_MSG_RESULT([    postgresql  . . . . . $enable_postgresql])
 AC_MSG_RESULT([    powerdns  . . . . . . $enable_powerdns])
 AC_MSG_RESULT([    processes . . . . . . $enable_processes])
+AC_MSG_RESULT([    procevent_sim . . . . $enable_procevent_sim])
 AC_MSG_RESULT([    procevent . . . . . . $enable_procevent])
 AC_MSG_RESULT([    protocols . . . . . . $enable_protocols])
 AC_MSG_RESULT([    python  . . . . . . . $enable_python])
