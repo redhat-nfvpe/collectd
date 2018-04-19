@@ -193,7 +193,7 @@ static int uuid_init(void) {
   char *uuid = uuid_get_local();
 
   if (uuid) {
-    hostname_set(uuid);
+    sstrncpy(hostname_g, uuid, DATA_MAX_NAME_LEN);
     sfree(uuid);
     return 0;
   }
