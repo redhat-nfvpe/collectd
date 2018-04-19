@@ -710,4 +710,3 @@ void module_register(void) {
   plugin_register_read("connectivity", connectivity_read);
   plugin_register_shutdown("connectivity", connectivity_shutdown);
 } /* void module_register */
-
