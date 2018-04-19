@@ -6374,6 +6374,10 @@ if test "x$with_libyajl" = "xyes"; then
   plugin_sysevent="yes"
 fi
 
+if test "x$with_libmnl" = "xyes"; then
+  plugin_connectivity="yes"
+fi
+
 if test "x$have_processor_info" = "xyes"; then
   plugin_cpu="yes"
 fi

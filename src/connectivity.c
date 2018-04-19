@@ -32,7 +32,6 @@
 #include "utils_complain.h"
 #include "utils_ignorelist.h"
 
-#include <asm/types.h>
 #include <errno.h>
 #include <net/if.h>
 #include <netinet/in.h>
@@ -45,15 +44,6 @@
 #include <libmnl/libmnl.h>
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
-
-#include <yajl/yajl_common.h>
-#include <yajl/yajl_gen.h>
-#if HAVE_YAJL_YAJL_VERSION_H
-#include <yajl/yajl_version.h>
-#endif
-#if defined(YAJL_MAJOR) && (YAJL_MAJOR > 1)
-#define HAVE_YAJL_V2 1
-#endif
 
 #define MYPROTO NETLINK_ROUTE
 
@@ -73,11 +63,11 @@
 #define CONNECTIVITY_REPORTING_ENTITY_NAME_FIELD "reportingEntityName"
 #define CONNECTIVITY_REPORTING_ENTITY_NAME_VALUE "collectd connectivity plugin"
 #define CONNECTIVITY_SEQUENCE_FIELD "sequence"
-#define CONNECTIVITY_SEQUENCE_VALUE "0"
+#define CONNECTIVITY_SEQUENCE_VALUE 0
 #define CONNECTIVITY_SOURCE_NAME_FIELD "sourceName"
 #define CONNECTIVITY_START_EPOCH_MICROSEC_FIELD "startEpochMicrosec"
 #define CONNECTIVITY_VERSION_FIELD "version"
-#define CONNECTIVITY_VERSION_VALUE "1.0"
+#define CONNECTIVITY_VERSION_VALUE 1.0
 
 #define CONNECTIVITY_NEW_STATE_FIELD "newState"
 #define CONNECTIVITY_NEW_STATE_FIELD_DOWN_VALUE "outOfService"
@@ -88,7 +78,7 @@
 #define CONNECTIVITY_STATE_CHANGE_FIELDS_FIELD "stateChangeFields"
 #define CONNECTIVITY_STATE_CHANGE_FIELDS_VERSION_FIELD                         \
   "stateChangeFieldsVersion"
-#define CONNECTIVITY_STATE_CHANGE_FIELDS_VERSION_VALUE "1.0"
+#define CONNECTIVITY_STATE_CHANGE_FIELDS_VERSION_VALUE 1.0
 #define CONNECTIVITY_STATE_INTERFACE_FIELD "stateInterface"
 
 /*
@@ -120,7 +110,7 @@ static pthread_t connectivity_thread_id;
 static pthread_mutex_t connectivity_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t connectivity_cond = PTHREAD_COND_INITIALIZER;
 static struct mnl_socket *sock;
-static int event_id = 0;
+static unsigned int event_id = 0;
 
 static const char *config_keys[] = {"Interface"};
 static int config_keys_num = STATIC_ARRAY_SIZE(config_keys);
@@ -129,258 +119,148 @@ static int config_keys_num = STATIC_ARRAY_SIZE(config_keys);
  * Private functions
  */
 
-static int gen_message_payload(int state, int old_state, const char *interface,
-                               long long unsigned int timestamp, char **buf) {
-  const unsigned char *buf2;
-  yajl_gen g;
-  char json_str[DATA_MAX_NAME_LEN];
-
-#if !defined(HAVE_YAJL_V2)
-  yajl_gen_config conf = {};
-
-  conf.beautify = 0;
-#endif
-
-#if HAVE_YAJL_V2
-  size_t len;
-  g = yajl_gen_alloc(NULL);
-  yajl_gen_config(g, yajl_gen_beautify, 0);
-#else
-  unsigned int len;
-  g = yajl_gen_alloc(&conf, NULL);
-#endif
-
-  yajl_gen_clear(g);
+static int gen_metadata_payload(int state, int old_state, const char *interface,
+                                long long unsigned int timestamp,
+                                notification_t *n) {
+  char tmp_str[DATA_MAX_NAME_LEN];
+  notification_meta_t *header = NULL;
+  notification_meta_t *domain = NULL;
 
   // *** BEGIN common event header ***
 
-  if (yajl_gen_map_open(g) != yajl_gen_status_ok)
+  // Add the object as "ves" to the notification's meta (the notification's meta
+  // will be created by this call, and it will be the VES header)
+
+  if (plugin_notification_meta_add_nested(n, "ves") != 0)
     goto err;
 
-  // domain
-  if (yajl_gen_string(g, (u_char *)CONNECTIVITY_DOMAIN_FIELD,
-                      strlen(CONNECTIVITY_DOMAIN_FIELD)) != yajl_gen_status_ok)
+  // Now populate the VES header, but first we need to acquire it
+  if (plugin_notification_meta_get_meta_tail(n, &header) != 0)
     goto err;
 
-  if (yajl_gen_string(g, (u_char *)CONNECTIVITY_DOMAIN_VALUE,
-                      strlen(CONNECTIVITY_DOMAIN_VALUE)) != yajl_gen_status_ok)
-    goto err;
-
-  // eventId
-  if (yajl_gen_string(g, (u_char *)CONNECTIVITY_EVENT_ID_FIELD,
-                      strlen(CONNECTIVITY_EVENT_ID_FIELD)) !=
-      yajl_gen_status_ok)
-    goto err;
-
-  event_id = event_id + 1;
-  int event_id_len = sizeof(char) * sizeof(int) * 4 + 1;
-  memset(json_str, '\0', DATA_MAX_NAME_LEN);
-  snprintf(json_str, event_id_len, "%d", event_id);
-
-  if (yajl_gen_number(g, json_str, strlen(json_str)) != yajl_gen_status_ok) {
+  if (header == NULL) {
+    ERROR("connectivity plugin: gen_metadata_payload could not acquire VES "
+          "header.");
     goto err;
   }
 
-  // eventName
-  if (yajl_gen_string(g, (u_char *)CONNECTIVITY_EVENT_NAME_FIELD,
-                      strlen(CONNECTIVITY_EVENT_NAME_FIELD)) !=
-      yajl_gen_status_ok)
+  // domain
+  if (plugin_notification_meta_append_string(header, CONNECTIVITY_DOMAIN_FIELD,
+                                             CONNECTIVITY_DOMAIN_VALUE) != 0)
     goto err;
 
+  // eventId
+  event_id = event_id + 1;
+
+  if (plugin_notification_meta_append_unsigned_int(
+          header, CONNECTIVITY_EVENT_ID_FIELD, event_id) != 0)
+    goto err;
+
+  // eventName
   int event_name_len = 0;
   event_name_len = event_name_len + strlen(interface);    // interface name
   event_name_len = event_name_len + (state == 0 ? 4 : 2); // "down" or "up"
   event_name_len =
       event_name_len + 12; // "interface", 2 spaces and null-terminator
-  memset(json_str, '\0', DATA_MAX_NAME_LEN);
-  snprintf(json_str, event_name_len, "interface %s %s", interface,
+  memset(tmp_str, '\0', DATA_MAX_NAME_LEN);
+  snprintf(tmp_str, event_name_len, "interface %s %s", interface,
            (state == 0 ? CONNECTIVITY_EVENT_NAME_DOWN_VALUE
                        : CONNECTIVITY_EVENT_NAME_UP_VALUE));
 
-  if (yajl_gen_string(g, (u_char *)json_str, strlen(json_str)) !=
-      yajl_gen_status_ok) {
+  if (plugin_notification_meta_append_string(
+          header, CONNECTIVITY_EVENT_NAME_FIELD, tmp_str) != 0)
     goto err;
-  }
 
   // lastEpochMicrosec
-  if (yajl_gen_string(g, (u_char *)CONNECTIVITY_LAST_EPOCH_MICROSEC_FIELD,
-                      strlen(CONNECTIVITY_LAST_EPOCH_MICROSEC_FIELD)) !=
-      yajl_gen_status_ok)
+  if (plugin_notification_meta_append_unsigned_int(
+          header, CONNECTIVITY_LAST_EPOCH_MICROSEC_FIELD,
+          (long long unsigned int)CDTIME_T_TO_US(cdtime())) != 0)
     goto err;
-
-  int last_epoch_microsec_len =
-      sizeof(char) * sizeof(long long unsigned int) * 4 + 1;
-  memset(json_str, '\0', DATA_MAX_NAME_LEN);
-  snprintf(json_str, last_epoch_microsec_len, "%llu",
-           (long long unsigned int)CDTIME_T_TO_US(cdtime()));
-
-  if (yajl_gen_number(g, json_str, strlen(json_str)) != yajl_gen_status_ok) {
-    goto err;
-  }
 
   // priority
-  if (yajl_gen_string(g, (u_char *)CONNECTIVITY_PRIORITY_FIELD,
-                      strlen(CONNECTIVITY_PRIORITY_FIELD)) !=
-      yajl_gen_status_ok)
-    goto err;
-
-  if (yajl_gen_string(g, (u_char *)CONNECTIVITY_PRIORITY_VALUE,
-                      strlen(CONNECTIVITY_PRIORITY_VALUE)) !=
-      yajl_gen_status_ok)
+  if (plugin_notification_meta_append_string(header,
+                                             CONNECTIVITY_PRIORITY_FIELD,
+                                             CONNECTIVITY_PRIORITY_VALUE) != 0)
     goto err;
 
   // reportingEntityName
-  if (yajl_gen_string(g, (u_char *)CONNECTIVITY_REPORTING_ENTITY_NAME_FIELD,
-                      strlen(CONNECTIVITY_REPORTING_ENTITY_NAME_FIELD)) !=
-      yajl_gen_status_ok)
-    goto err;
+  if (plugin_notification_meta_append_string(
+          header, CONNECTIVITY_REPORTING_ENTITY_NAME_FIELD,
+          CONNECTIVITY_REPORTING_ENTITY_NAME_VALUE) != 0)
 
-  if (yajl_gen_string(g, (u_char *)CONNECTIVITY_REPORTING_ENTITY_NAME_VALUE,
-                      strlen(CONNECTIVITY_REPORTING_ENTITY_NAME_VALUE)) !=
-      yajl_gen_status_ok)
-    goto err;
-
-  // sequence
-  if (yajl_gen_string(g, (u_char *)CONNECTIVITY_SEQUENCE_FIELD,
-                      strlen(CONNECTIVITY_SEQUENCE_FIELD)) !=
-      yajl_gen_status_ok)
-    goto err;
-
-  if (yajl_gen_number(g, CONNECTIVITY_SEQUENCE_VALUE,
-                      strlen(CONNECTIVITY_SEQUENCE_VALUE)) !=
-      yajl_gen_status_ok)
-    goto err;
+    // sequence
+    if (plugin_notification_meta_append_unsigned_int(
+            header, CONNECTIVITY_SEQUENCE_FIELD,
+            (unsigned int)CONNECTIVITY_SEQUENCE_VALUE) != 0)
+      goto err;
 
   // sourceName
-  if (yajl_gen_string(g, (u_char *)CONNECTIVITY_SOURCE_NAME_FIELD,
-                      strlen(CONNECTIVITY_SOURCE_NAME_FIELD)) !=
-      yajl_gen_status_ok)
-    goto err;
+  if (plugin_notification_meta_append_string(
+          header, CONNECTIVITY_SOURCE_NAME_FIELD, interface) != 0)
 
-  if (yajl_gen_string(g, (u_char *)interface, strlen(interface)) !=
-      yajl_gen_status_ok)
-    goto err;
-
-  // startEpochMicrosec
-  if (yajl_gen_string(g, (u_char *)CONNECTIVITY_START_EPOCH_MICROSEC_FIELD,
-                      strlen(CONNECTIVITY_START_EPOCH_MICROSEC_FIELD)) !=
-      yajl_gen_status_ok)
-    goto err;
-
-  int start_epoch_microsec_len =
-      sizeof(char) * sizeof(long long unsigned int) * 4 + 1;
-  memset(json_str, '\0', DATA_MAX_NAME_LEN);
-  snprintf(json_str, start_epoch_microsec_len, "%llu",
-           (long long unsigned int)timestamp);
-
-  if (yajl_gen_number(g, json_str, strlen(json_str)) != yajl_gen_status_ok) {
-    goto err;
-  }
+    // startEpochMicrosec
+    if (plugin_notification_meta_append_unsigned_int(
+            header, CONNECTIVITY_START_EPOCH_MICROSEC_FIELD,
+            (long long unsigned int)timestamp) != 0)
+      goto err;
 
   // version
-  if (yajl_gen_string(g, (u_char *)CONNECTIVITY_VERSION_FIELD,
-                      strlen(CONNECTIVITY_VERSION_FIELD)) != yajl_gen_status_ok)
-    goto err;
-
-  if (yajl_gen_number(g, CONNECTIVITY_VERSION_VALUE,
-                      strlen(CONNECTIVITY_VERSION_VALUE)) != yajl_gen_status_ok)
+  if (plugin_notification_meta_append_double(header, CONNECTIVITY_VERSION_FIELD,
+                                             CONNECTIVITY_VERSION_VALUE) != 0)
     goto err;
 
   // *** END common event header ***
 
   // *** BEGIN state change fields ***
 
-  if (yajl_gen_string(g, (u_char *)CONNECTIVITY_STATE_CHANGE_FIELDS_FIELD,
-                      strlen(CONNECTIVITY_STATE_CHANGE_FIELDS_FIELD)) !=
-      yajl_gen_status_ok)
+  // Append a nested metadata object to header, with key as "stateChangeFields",
+  // and then find it.  We will then append children data to it.
+
+  if (plugin_notification_meta_append_nested(
+          header, CONNECTIVITY_STATE_CHANGE_FIELDS_FIELD) != 0)
     goto err;
 
-  if (yajl_gen_map_open(g) != yajl_gen_status_ok)
+  if (plugin_notification_meta_get_nested_tail(header, &domain) != 0)
     goto err;
+
+  if (domain == NULL) {
+    ERROR("connectivity plugin: gen_metadata_payload could not acquire VES "
+          "domain.");
+    goto err;
+  }
 
   // newState
-  if (yajl_gen_string(g, (u_char *)CONNECTIVITY_NEW_STATE_FIELD,
-                      strlen(CONNECTIVITY_NEW_STATE_FIELD)) !=
-      yajl_gen_status_ok)
-    goto err;
-
-  int new_state_len =
-      (state == 0 ? strlen(CONNECTIVITY_NEW_STATE_FIELD_DOWN_VALUE)
-                  : strlen(CONNECTIVITY_NEW_STATE_FIELD_UP_VALUE));
-
-  if (yajl_gen_string(
-          g, (u_char *)(state == 0 ? CONNECTIVITY_NEW_STATE_FIELD_DOWN_VALUE
-                                   : CONNECTIVITY_NEW_STATE_FIELD_UP_VALUE),
-          new_state_len) != yajl_gen_status_ok)
+  if (plugin_notification_meta_append_string(
+          domain, CONNECTIVITY_NEW_STATE_FIELD,
+          (state == 0 ? CONNECTIVITY_NEW_STATE_FIELD_DOWN_VALUE
+                      : CONNECTIVITY_NEW_STATE_FIELD_UP_VALUE)) != 0)
     goto err;
 
   // oldState
-  if (yajl_gen_string(g, (u_char *)CONNECTIVITY_OLD_STATE_FIELD,
-                      strlen(CONNECTIVITY_OLD_STATE_FIELD)) !=
-      yajl_gen_status_ok)
-    goto err;
-
-  int old_state_len =
-      (old_state == 0 ? strlen(CONNECTIVITY_OLD_STATE_FIELD_DOWN_VALUE)
-                      : strlen(CONNECTIVITY_OLD_STATE_FIELD_UP_VALUE));
-
-  if (yajl_gen_string(
-          g, (u_char *)(old_state == 0 ? CONNECTIVITY_OLD_STATE_FIELD_DOWN_VALUE
-                                       : CONNECTIVITY_OLD_STATE_FIELD_UP_VALUE),
-          old_state_len) != yajl_gen_status_ok)
+  if (plugin_notification_meta_append_string(
+          domain, CONNECTIVITY_OLD_STATE_FIELD,
+          (old_state == 0 ? CONNECTIVITY_OLD_STATE_FIELD_DOWN_VALUE
+                          : CONNECTIVITY_OLD_STATE_FIELD_UP_VALUE)) != 0)
     goto err;
 
   // stateChangeFieldsVersion
-  if (yajl_gen_string(g,
-                      (u_char *)CONNECTIVITY_STATE_CHANGE_FIELDS_VERSION_FIELD,
-                      strlen(CONNECTIVITY_STATE_CHANGE_FIELDS_VERSION_FIELD)) !=
-      yajl_gen_status_ok)
-    goto err;
-
-  if (yajl_gen_number(g, CONNECTIVITY_STATE_CHANGE_FIELDS_VERSION_VALUE,
-                      strlen(CONNECTIVITY_STATE_CHANGE_FIELDS_VERSION_VALUE)) !=
-      yajl_gen_status_ok)
+  if (plugin_notification_meta_append_double(
+          domain, CONNECTIVITY_STATE_CHANGE_FIELDS_VERSION_FIELD,
+          CONNECTIVITY_STATE_CHANGE_FIELDS_VERSION_VALUE) != 0)
     goto err;
 
   // stateInterface
-  if (yajl_gen_string(g, (u_char *)CONNECTIVITY_STATE_INTERFACE_FIELD,
-                      strlen(CONNECTIVITY_STATE_INTERFACE_FIELD)) !=
-      yajl_gen_status_ok)
-    goto err;
-
-  if (yajl_gen_string(g, (u_char *)interface, strlen(interface)) !=
-      yajl_gen_status_ok)
-    goto err;
-
-  if (yajl_gen_map_close(g) != yajl_gen_status_ok)
+  if (plugin_notification_meta_append_string(
+          domain, CONNECTIVITY_STATE_INTERFACE_FIELD, interface) != 0)
     goto err;
 
   // *** END state change fields ***
 
-  if (yajl_gen_map_close(g) != yajl_gen_status_ok)
-    goto err;
-
-  if (yajl_gen_get_buf(g, &buf2, &len) != yajl_gen_status_ok)
-    goto err;
-
-  *buf = malloc(strlen((char *)buf2) + 1);
-
-  if (*buf == NULL) {
-    char errbuf[1024];
-    ERROR("connectivity plugin: malloc failed during gen_message_payload: %s",
-          sstrerror(errno, errbuf, sizeof(errbuf)));
-    goto err;
-  }
-
-  sstrncpy(*buf, (char *)buf2, strlen((char *)buf2) + 1);
-
-  yajl_gen_free(g);
-
   return 0;
 
 err:
-  yajl_gen_free(g);
-  ERROR("connectivity plugin: gen_message_payload failed to generate JSON");
+  ERROR(
+      "connectivity plugin: gen_metadata_payload failed to generate metadata");
   return -1;
 }
 
@@ -732,7 +612,7 @@ static int connectivity_config(const char *key, const char *value) /* {{{ */
 static void connectivity_dispatch_notification(
     const char *interface, const char *type, /* {{{ */
     gauge_t value, gauge_t old_value, long long unsigned int timestamp) {
-  char *buf = NULL;
+
   notification_t n = {
       NOTIF_FAILURE, cdtime(), "", "", "connectivity", "", "", "", NULL};
 
@@ -744,35 +624,13 @@ static void connectivity_dispatch_notification(
   sstrncpy(n.type, "gauge", sizeof(n.type));
   sstrncpy(n.type_instance, "interface_status", sizeof(n.type_instance));
 
-  gen_message_payload(value, old_value, interface, timestamp, &buf);
-
-  notification_meta_t *m = calloc(1, sizeof(*m));
-
-  if (m == NULL) {
-    char errbuf[1024];
-    sfree(buf);
-    ERROR("connectivity plugin: unable to allocate metadata: %s",
-          sstrerror(errno, errbuf, sizeof(errbuf)));
-    return;
-  }
-
-  sstrncpy(m->name, "ves", sizeof(m->name));
-  m->nm_value.nm_string = sstrdup(buf);
-  m->type = NM_TYPE_STRING;
-  n.meta = m;
-
-  DEBUG("connectivity plugin: notification message: %s",
-        n.meta->nm_value.nm_string);
+  gen_metadata_payload(value, old_value, interface, timestamp, &n);
 
   DEBUG("connectivity plugin: dispatching state %d for interface %s",
         (int)value, interface);
 
   plugin_dispatch_notification(&n);
   plugin_notification_meta_free(n.meta);
-
-  // malloc'd in gen_message_payload
-  if (buf != NULL)
-    sfree(buf);
 }
 
 static int connectivity_read(void) /* {{{ */
