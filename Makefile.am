@@ -1467,6 +1467,7 @@ procevent_sim_la_SOURCES = src/procevent_sim.c
 procevent_sim_la_CPPFLAGS = $(AM_CPPFLAGS) 
 procevent_sim_la_LDFLAGS = $(PLUGIN_LDFLAGS) 
 procevent_sim_la_LIBADD = libignorelist.la
+endif
 
 if BUILD_PLUGIN_PROCEVENT
 pkglib_LTLIBRARIES += procevent.la
