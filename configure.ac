@@ -6234,6 +6234,7 @@ if test "x$ac_system" = "xLinux"; then
   plugin_nfs="yes"
   plugin_numa="yes"
   plugin_processes="yes"
+  plugin_procevent="yes"
   plugin_protocols="yes"
   plugin_serial="yes"
   plugin_swap="yes"

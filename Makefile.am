@@ -1456,9 +1456,9 @@ endif
 if BUILD_PLUGIN_PROCEVENT
 pkglib_LTLIBRARIES += procevent.la
 procevent_la_SOURCES = src/procevent.c
-procevent_la_CPPFLAGS = $(AM_CPPFLAGS) $(BUILD_WITH_LIBYAJL_CPPFLAGS)
-procevent_la_LDFLAGS = $(PLUGIN_LDFLAGS) $(BUILD_WITH_LIBYAJL_LDFLAGS)
-procevent_la_LIBADD = $(BUILD_WITH_LIBYAJL_LIBS) libignorelist.la
+procevent_la_CPPFLAGS = $(AM_CPPFLAGS)
+procevent_la_LDFLAGS = $(PLUGIN_LDFLAGS)
+procevent_la_LIBADD = libignorelist.la
 endif
 
 if BUILD_PLUGIN_PROTOCOLS
