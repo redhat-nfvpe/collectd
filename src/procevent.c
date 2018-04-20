@@ -125,8 +125,9 @@ static int buffer_length;
 static circbuf_t ring;
 static processlist_t *processlist_head = NULL;
 static int event_id = 0;
+static int send_metrics = 0;
 
-static const char *config_keys[] = {"BufferLength", "Process", "RegexProcess"};
+static const char *config_keys[] = {"BufferLength", "Process", "RegexProcess", "SendMetrics"};
 static int config_keys_num = STATIC_ARRAY_SIZE(config_keys);
 
 /*
@@ -892,6 +893,10 @@ static int procevent_config(const char *key, const char *value) /* {{{ */
     WARNING("procevent plugin: The plugin has been compiled without support "
             "for the \"RegexProcess\" option.");
 #endif
+  } else if (strcasecmp(key, "SendMetrics") == 0) {
+    if (IS_TRUE(value)) {
+      send_metrics = 1;
+    }
   } else {
     return (-1);
   }
@@ -923,6 +928,31 @@ static void procevent_dispatch_notification(int pid, const char *type, /* {{{ */
   plugin_notification_meta_free(n.meta);
 }
 
+static void procevent_submit(int pid, const char *type, /* {{{ */
+                   gauge_t value, const char *process) {
+  value_list_t vl = VALUE_LIST_INIT;
+
+  vl.values = &(value_t){.gauge = value};
+  vl.values_len = 1;
+  sstrncpy(vl.plugin, "procevent", sizeof(vl.plugin));
+  sstrncpy(vl.plugin_instance, process, sizeof(vl.plugin_instance));
+  sstrncpy(vl.type, type, sizeof(vl.type));
+
+  DEBUG("procevent_sim plugin: dispatching state %d for PID %d (%s)", (int)value,
+        pid, process);
+
+  // Create metadata to store JSON key-values
+  meta_data_t *meta = meta_data_create();
+
+  vl.meta = meta;
+
+  meta_data_add_string(meta, "entity", process);
+
+  plugin_dispatch_values(&vl);
+
+  meta_data_destroy(meta);
+} /* }}} void interface_submit */
+
 static int procevent_read(void) /* {{{ */
 {
   if (procevent_thread_error != 0) {
@@ -952,6 +982,12 @@ static int procevent_read(void) /* {{{ */
         procevent_dispatch_notification(ring.buffer[ring.tail][0], "gauge",
                                         ring.buffer[ring.tail][1], pl->process,
                                         ring.buffer[ring.tail][3]);
+
+        if (send_metrics == 1)
+        {
+          procevent_submit(ring.buffer[ring.tail][0], "gauge", ring.buffer[ring.tail][1], pl->process);
+        }
+
         DEBUG("procevent plugin: PID %d (%s) EXITED, removing PID from process "
               "list",
               pl->pid, pl->process);
@@ -966,6 +1002,12 @@ static int procevent_read(void) /* {{{ */
         procevent_dispatch_notification(ring.buffer[ring.tail][0], "gauge",
                                         ring.buffer[ring.tail][1], pl->process,
                                         ring.buffer[ring.tail][3]);
+
+        if (send_metrics == 1)
+        {
+          procevent_submit(ring.buffer[ring.tail][0], "gauge", ring.buffer[ring.tail][1], pl->process);
+        }
+
         DEBUG(
             "procevent plugin: PID %d (%s) STARTED, adding PID to process list",
             pl->pid, pl->process);
