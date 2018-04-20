@@ -111,8 +111,9 @@ static pthread_mutex_t connectivity_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t connectivity_cond = PTHREAD_COND_INITIALIZER;
 static struct mnl_socket *sock;
 static unsigned int event_id = 0;
+static int send_metrics = 0;
 
-static const char *config_keys[] = {"Interface"};
+static const char *config_keys[] = {"Interface", "SendMetrics"};
 static int config_keys_num = STATIC_ARRAY_SIZE(config_keys);
 
 /*
@@ -602,6 +603,10 @@ static int connectivity_config(const char *key, const char *value) /* {{{ */
   if (strcasecmp(key, "Interface") == 0) {
     ignorelist_add(ignorelist, value);
     monitor_all_interfaces = 0;
+  } else if (strcasecmp(key, "SendMetrics") == 0) {
+    if (IS_TRUE(value)) {
+      send_metrics = 1;
+    }
   } else {
     return (-1);
   }
@@ -632,6 +637,31 @@ static void connectivity_dispatch_notification(
   plugin_dispatch_notification(&n);
   plugin_notification_meta_free(n.meta);
 }
+
+static void connectivity_submit(const char *dev, const char *type, /* {{{ */
+                   gauge_t value) {
+  value_list_t vl = VALUE_LIST_INIT;
+
+  vl.values = &(value_t){.gauge = value};
+  vl.values_len = 1;
+  sstrncpy(vl.plugin, "connectivity_sim", sizeof(vl.plugin));
+  sstrncpy(vl.plugin_instance, dev, sizeof(vl.plugin_instance));
+  sstrncpy(vl.type, type, sizeof(vl.type));
+
+  DEBUG("connectivity plugin: dispatching state %d for interface %s", (int)value,
+        dev);
+
+  // Create metadata to store JSON key-values
+  meta_data_t *meta = meta_data_create();
+
+  vl.meta = meta;
+
+  meta_data_add_string(meta, "entity", dev);
+
+  plugin_dispatch_values(&vl);
+
+  meta_data_destroy(meta);
+} /* }}} void interface_submit */
 
 static int connectivity_read(void) /* {{{ */
 {
@@ -669,6 +699,12 @@ static int connectivity_read(void) /* {{{ */
     if (status != prev_status && sent == 0) {
       connectivity_dispatch_notification(il->interface, "gauge", status,
                                          prev_status, il->timestamp);
+
+      if (send_metrics == 1)
+      {
+        connectivity_submit(il->interface, "gauge", status);
+      }
+
       il->sent = 1;
     }
 
