@@ -644,7 +644,7 @@ static void connectivity_submit(const char *dev, const char *type, /* {{{ */
 
   vl.values = &(value_t){.gauge = value};
   vl.values_len = 1;
-  sstrncpy(vl.plugin, "connectivity_sim", sizeof(vl.plugin));
+  sstrncpy(vl.plugin, "connectivity", sizeof(vl.plugin));
   sstrncpy(vl.plugin_instance, dev, sizeof(vl.plugin_instance));
   sstrncpy(vl.type, type, sizeof(vl.type));
 
