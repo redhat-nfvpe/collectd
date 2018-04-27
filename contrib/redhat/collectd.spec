@@ -41,6 +41,7 @@
 # plugins enabled by default
 %define with_aggregation 0%{!?_without_aggregation:1}
 %define with_amqp 0%{!?_without_amqp:1}
+%define with_amqp1 0%{!?_without_amqp1:1}
 %define with_apache 0%{!?_without_apache:1}
 %define with_apcups 0%{!?_without_apcups:1}
 %define with_ascent 0%{!?_without_ascent:1}
@@ -50,6 +51,7 @@
 %define with_cgroups 0%{!?_without_cgroups:1}
 %define with_chrony 0%{!?_without_chrony:1}
 %define with_conntrack 0%{!?_without_conntrack:1}
+%define with_connectivity 0%{!?_without_connectivity:1}
 %define with_contextswitch 0%{!?_without_contextswitch:1}
 %define with_cpu 0%{!?_without_cpu:1}
 %define with_cpufreq 0%{!?_without_cpufreq:1}
@@ -118,6 +120,7 @@
 %define with_postgresql 0%{!?_without_postgresql:1}
 %define with_powerdns 0%{!?_without_powerdns:1}
 %define with_processes 0%{!?_without_processes:1}
+%define with_procevent 0%{!?_without_procevent:1}
 %define with_protocols 0%{!?_without_protocols:1}
 %define with_python 0%{!?_without_python:1}
 %define with_redis 0%{!?_without_redis:1}
@@ -131,6 +134,7 @@
 %define with_statsd 0%{!?_without_statsd:1}
 %define with_swap 0%{!?_without_swap:1}
 %define with_synproxy 0%{!?_without_synproxy:0}
+%define with_sysevent 0%{!?_without_sysevent:1}
 %define with_syslog 0%{!?_without_syslog:1}
 %define with_table 0%{!?_without_table:1}
 %define with_tail 0%{!?_without_tail:1}
@@ -286,6 +290,17 @@ The AMQP plugin transmits or receives values collected by collectd via the
 Advanced Message Queuing Protocol (AMQP).
 %endif
 
+%if %{with_amqp1}
+%package amqp1
+Summary:	AMQP 1.0 plugin for collectd
+Group:		System Environment/Daemons
+Requires:	%{name}%{?_isa} = %{version}-%{release}
+BuildRequires:	qpid-proton-c-devel
+%description amqp1
+The AMQP plugin transmits or receives values collected by collectd via the
+Advanced Message Queuing Protocol (AMQP).
+%endif
+
 %if %{with_apache}
 %package apache
 Summary:	Apache plugin for collectd
@@ -354,6 +369,15 @@ Group:         System Environment/Daemons
 Requires:      %{name}%{?_isa} = %{version}-%{release}
 %description chrony
 Chrony plugin for collectd
+%endif
+
+%if %{with_connectivity}
+%package connectivity
+Summary:	Connectivity plugin for collectd
+Group:		System Environment/Daemons
+Requires:	%{name}%{?_isa} = %{version}-%{release}
+%description connectivity
+Monitors network interface up/down status via netlink library.
 %endif
 
 %if %{with_curl}
@@ -758,6 +782,15 @@ The PostgreSQL plugin connects to and executes SQL statements on a PostgreSQL
 database.
 %endif
 
+%if %{with_procevent}
+%package procevent
+Summary:	Processes event plugin for collectd
+Group:		System Environment/Daemons
+Requires:	%{name}%{?_isa} = %{version}-%{release}
+%description procevent
+Monitors process starts/stops via netlink library.
+%endif
+
 %if %{with_python}
 %package python
 Summary:	Python plugin for collectd
@@ -855,6 +888,15 @@ Requires:	%{name}%{?_isa} = %{version}-%{release}
 BuildRequires:	net-snmp-devel
 %description snmp_agent
 This plugin for collectd to support AgentX integration.
+%endif
+
+%if %{with_sysevent}
+%package sysevent
+Summary:	Rsyslog event plugin for collectd
+Group:		System Environment/Daemons
+Requires:	%{name}%{?_isa} = %{version}-%{release}
+%description sysevent
+Monitors rsyslog for system events.
 %endif
 
 %if %{with_varnish}
@@ -1015,6 +1057,12 @@ Collectd utilities
 %define _with_amqp --disable-amqp
 %endif
 
+%if %{with_amqp1}
+%define _with_amqp1 --enable-amqp1
+%else
+%define _with_amqp1 --disable-amqp1
+%endif
+
 %if %{with_apache}
 %define _with_apache --enable-apache
 %else
@@ -1079,6 +1127,12 @@ Collectd utilities
 %define _with_conntrack --enable-conntrack
 %else
 %define _with_conntrack --disable-conntrack
+%endif
+
+%if %{with_connectivity}
+%define _with_connectivity --enable-connectivity
+%else
+%define _with_connectivity --disable-connectivity
 %endif
 
 %if %{with_contextswitch}
@@ -1567,6 +1621,12 @@ Collectd utilities
 %define _with_processes --disable-processes
 %endif
 
+%if %{with_procevent}
+%define _with_procevent --enable-procevent
+%else
+%define _with_procevent --disable-procevent
+%endif
+
 %if %{with_protocols}
 %define _with_protocols --enable-protocols
 %else
@@ -1660,6 +1720,12 @@ Collectd utilities
 %define _with_synproxy --enable-synproxy
 %else
 %define _with_synproxy --disable-synproxy
+%endif
+
+%if %{with_sysevent}
+%define _with_sysevent --enable-sysevent
+%else
+%define _with_sysevent --disable-sysevent
 %endif
 
 %if %{with_syslog}
@@ -1888,6 +1954,7 @@ Collectd utilities
 	--enable-target_v5upgrade \
 	%{?_with_aggregation} \
 	%{?_with_amqp} \
+	%{?_with_amqp1} \
 	%{?_with_apache} \
 	%{?_with_apcups} \
 	%{?_with_apple_sensors} \
@@ -1900,6 +1967,7 @@ Collectd utilities
 	%{?_with_cgroups} \
 	%{?_with_chrony} \
 	%{?_with_conntrack} \
+	%{?_with_connectivity} \
 	%{?_with_contextswitch} \
 	%{?_with_cpufreq} \
 	%{?_with_cpusleep} \
@@ -1979,6 +2047,7 @@ Collectd utilities
 	%{?_with_postgresql} \
 	%{?_with_powerdns} \
 	%{?_with_processes} \
+	%{?_with_procevent} \
 	%{?_with_protocols} \
 	%{?_with_python} \
 	%{?_with_redis} \
@@ -1994,6 +2063,7 @@ Collectd utilities
 	%{?_with_statsd} \
 	%{?_with_swap} \
 	%{?_with_synproxy} \
+	%{?_with_sysevent} \
 	%{?_with_syslog} \
 	%{?_with_table} \
 	%{?_with_tail_csv} \
@@ -2399,6 +2469,11 @@ fi
 %{_libdir}/%{name}/amqp.so
 %endif
 
+%if %{with_amqp1}
+%files amqp1
+%{_libdir}/%{name}/amqp1.so
+%endif
+
 %if %{with_apache}
 %files apache
 %{_libdir}/%{name}/apache.so
@@ -2432,6 +2507,12 @@ fi
 %if %{with_chrony}
 %files chrony
 %{_libdir}/%{name}/chrony.so
+%endif
+
+%if %{with_connectivity}
+%files connectivity
+%{_libdir}/%{name}/connectivity.so
+%{_libdir}/%{name}/connectivity_sim.so
 %endif
 
 %if %{with_curl}
@@ -2638,6 +2719,12 @@ fi
 %{_libdir}/%{name}/postgresql.so
 %endif
 
+%if %{with_procevent}
+%files procevent
+%{_libdir}/%{name}/procevent.so
+%{_libdir}/%{name}/procevent_sim.so
+%endif
+
 %if %{with_python}
 %files python
 %{_mandir}/man5/collectd-python*
@@ -2683,6 +2770,11 @@ fi
 %if %{with_snmp_agent}
 %files snmp_agent
 %{_libdir}/%{name}/snmp_agent.so
+%endif
+
+%if %{with_sysevent}
+%files sysevent
+%{_libdir}/%{name}/sysevent.so
 %endif
 
 %if %{with_varnish}
