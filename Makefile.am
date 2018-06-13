@@ -544,7 +544,8 @@ endif
 
 if BUILD_PLUGIN_AMQP1
 pkglib_LTLIBRARIES += amqp1.la
-amqp1_la_SOURCES = src/amqp1.c
+amqp1_la_SOURCES = src/amqp1.c \
+	src/utils_deq.h
 amqp1_la_CPPFLAGS = $(AM_CPPFLAGS) $(BUILD_WITH_LIBQPIDPROTON_CPPFLAGS)
 amqp1_la_LDFLAGS = $(PLUGIN_LDFLAGS) $(BUILD_WITH_LIBQPIDPROTON_LDFLAGS)
 amqp1_la_LIBADD = \
@@ -1465,8 +1466,8 @@ endif
 if BUILD_PLUGIN_PROCEVENT_SIM
 pkglib_LTLIBRARIES += procevent_sim.la
 procevent_sim_la_SOURCES = src/procevent_sim.c
-procevent_sim_la_CPPFLAGS = $(AM_CPPFLAGS) 
-procevent_sim_la_LDFLAGS = $(PLUGIN_LDFLAGS) 
+procevent_sim_la_CPPFLAGS = $(AM_CPPFLAGS)
+procevent_sim_la_LDFLAGS = $(PLUGIN_LDFLAGS)
 procevent_sim_la_LIBADD = libignorelist.la
 endif
 
