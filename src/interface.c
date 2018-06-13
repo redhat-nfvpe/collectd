@@ -209,6 +209,8 @@ static int interface_read(void) {
     if (if_ptr->ifa_addr != NULL && if_ptr->ifa_addr->sa_family == AF_LINK) {
       if_data = (struct IFA_DATA *)if_ptr->ifa_data;
 
+      WARNING("AJB interface: %s", if_ptr->ifa_name);
+
       if (!report_inactive && if_data->IFA_RX_PACKT == 0 &&
           if_data->IFA_TX_PACKT == 0)
         continue;
